@@ -5,6 +5,7 @@ import { money, pct } from '../i18n';
 import { salesTax, type TaxLine } from '../tax/engine/sales';
 import { Card, Divider, Hero, Note, NumberField, Row, Screen, Segmented, Txt } from '../ui/kit';
 import { ProvinceChip } from '../ui/ProvincePicker';
+import { TipCard } from '../ui/TipCard';
 import { TablesBadge } from '../ui/TablesBadge';
 import { SPACE } from '../theme';
 
@@ -40,6 +41,7 @@ export function SalesScreen() {
   return (
     <Screen title={s.salesTitle} subtitle={s.appName} right={<TablesBadge />}>
       <ProvinceChip />
+      <TipCard id="sales" text={s.tips.sales} />
       <Card>
         <Txt variant="small" dim>{s.activity}</Txt>
         <Segmented options={[{ value: 'services', label: s.services }, { value: 'goods', label: s.goods }]} value={v.activity} onChange={(a) => upd({ activity: a })} />

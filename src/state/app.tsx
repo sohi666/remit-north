@@ -10,6 +10,10 @@ export interface Prefs {
   lang: 'auto' | Lang;
   theme: 'auto' | 'light' | 'dark';
   autoUpdate: boolean;
+  /** First-run guide finished or skipped. */
+  onboarded: boolean;
+  /** First-time tips the user has dismissed. */
+  tipsSeen: string[];
   year?: number;
   prov: Prov;
   payroll: {
@@ -41,6 +45,8 @@ const DEFAULTS: Prefs = {
   lang: 'auto',
   theme: 'auto',
   autoUpdate: true,
+  onboarded: false,
+  tipsSeen: [],
   prov: 'QC',
   payroll: { amount: 75000, enterAnnual: true, periods: 12, eiExempt: false, pensionExempt: false, reverse: false, wcbRate: 0, hsfPrimary: false, extraTax: 0, dependants: 0, federalClaim: 0, provincialClaim: 0, vacationRate: 0, ytdGross: 0, ytdPension: 0, ytdEi: 0, ytdQpip: 0 },
   sales: { sales: 50000, purchases: 3000, prior: 0, activity: 'services' },
@@ -143,4 +149,11 @@ export function useApp() {
   const v = useContext(Ctx);
   if (!v) throw new Error('AppProvider missing');
   return v;
+}
+
+/** Forces the dark palette for a subtree (the onboarding sits on a navy backdrop in both modes). */
+export function DarkScope({ children }: { children: React.ReactNode }) {
+  const v = useApp();
+  const value = useMemo(() => ({ ...v, c: DARK }), [v]);
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

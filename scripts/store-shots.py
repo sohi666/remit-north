@@ -14,8 +14,8 @@ TARGETS = [  # (folder, css width, css height, scale)
     ('fastlane/metadata/android/{L}/images/phoneScreenshots', 400, 800, 2.7),  # Play (1080x2160)
 ]
 PREFS = {
-    'en-US': {'lang': 'en', 'theme': 'dark', 'prov': 'QC', 'payroll': {'amount': 85000, 'enterAnnual': True, 'periods': 26, 'eiExempt': True}},
-    'fr-CA': {'lang': 'fr', 'theme': 'dark', 'prov': 'QC', 'payroll': {'amount': 85000, 'enterAnnual': True, 'periods': 26, 'eiExempt': True}},
+    'en-US': {'lang': 'en', 'theme': 'dark', 'onboarded': True, 'tipsSeen': ['payroll', 'sales', 'corp', 'owner'], 'prov': 'QC', 'payroll': {'amount': 85000, 'enterAnnual': True, 'periods': 26, 'eiExempt': True}},
+    'fr-CA': {'lang': 'fr', 'theme': 'dark', 'onboarded': True, 'tipsSeen': ['payroll', 'sales', 'corp', 'owner'], 'prov': 'QC', 'payroll': {'amount': 85000, 'enterAnnual': True, 'periods': 26, 'eiExempt': True}},
 }
 
 async def main():

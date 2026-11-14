@@ -74,6 +74,8 @@ export function MoreScreen() {
         ))}
       </Card>
 
+      <Button label={s.replayIntro} icon="play-circle-outline" kind="secondary" onPress={() => set('onboarded', false)} />
+
       <Card title={s.privacyTitle} icon="lock-closed-outline">
         <Txt variant="body" dim>{s.privacyBody}</Txt>
       </Card>

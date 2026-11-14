@@ -9,6 +9,7 @@ import { amountAt } from '../tax/engine/common';
 import { Button, Card, Collapsible, Divider, Hero, Note, NumberField, Row, Screen, Segmented, Sheet, ToggleRow, Txt, tap } from '../ui/kit';
 import { Donut, StackBar } from '../ui/charts';
 import { ProvinceChip } from '../ui/ProvincePicker';
+import { TipCard } from '../ui/TipCard';
 import { TablesBadge } from '../ui/TablesBadge';
 import { SPACE } from '../theme';
 
@@ -84,6 +85,7 @@ export function PayrollScreen() {
   return (
     <Screen title={s.payrollTitle} subtitle={s.appName} right={<TablesBadge />}>
       <ProvinceChip />
+      <TipCard id="payroll" text={s.tips.payroll} />
 
       <Card>
         <Segmented

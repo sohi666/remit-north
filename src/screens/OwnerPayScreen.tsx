@@ -6,6 +6,7 @@ import { ownerPayCurve, type OwnerPayPoint } from '../tax/engine/ownerPay';
 import { Card, Divider, Hero, Note, NumberField, Row, Screen, ToggleRow, Txt } from '../ui/kit';
 import { LineChart, StackBar } from '../ui/charts';
 import { ProvinceChip } from '../ui/ProvincePicker';
+import { TipCard } from '../ui/TipCard';
 import { TablesBadge } from '../ui/TablesBadge';
 import { SPACE } from '../theme';
 
@@ -45,6 +46,7 @@ export function OwnerPayScreen() {
   return (
     <Screen title={s.ownerTitle} subtitle={s.appName} right={<TablesBadge />}>
       <ProvinceChip />
+      <TipCard id="owner" text={s.tips.owner} />
       <Card>
         <NumberField label={s.profit} value={v.profit} onChange={(n) => upd({ profit: n })} />
         <ToggleRow label={s.eiOptOut} hint={s.eiOptOutHint} value={v.eiExempt} onChange={(x) => upd({ eiExempt: x })} />

@@ -14,6 +14,8 @@ import { SalesScreen } from './src/screens/SalesScreen';
 import { CorporateScreen } from './src/screens/CorporateScreen';
 import { OwnerPayScreen } from './src/screens/OwnerPayScreen';
 import { MoreScreen } from './src/screens/MoreScreen';
+import { Onboarding } from './src/screens/Onboarding';
+import { DarkScope } from './src/state/app';
 import { Txt, tap, type IconName } from './src/ui/kit';
 
 SplashScreen.preventAutoHideAsync().catch(() => undefined);
@@ -32,6 +34,35 @@ function initialTab(): Tab {
   if (Platform.OS !== 'web' || typeof window === 'undefined') return 'payroll';
   const t = new URLSearchParams(window.location.search).get('tab') as Tab | null;
   return t && TABS.some((x) => x.key === t) ? t : 'payroll';
+}
+
+/** Web QA: `?intro=1` replays the welcome, `?intro=0` skips it. */
+function introOverride(): boolean | null {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return null;
+  const v = new URLSearchParams(window.location.search).get('intro');
+  return v === '1' ? true : v === '0' ? false : null;
+}
+
+function Root() {
+  const { prefs, set, c } = useApp();
+  const [forced, setForced] = useState(introOverride);
+  const show = forced ?? !prefs.onboarded;
+  if (show) {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#0A0F1C' }}>
+        <StatusBar style="light" />
+        <DarkScope>
+          <Onboarding
+            onDone={() => {
+              setForced(null);
+              set('onboarded', true);
+            }}
+          />
+        </DarkScope>
+      </View>
+    );
+  }
+  return <Shell key={c.dark ? 'd' : 'l'} />;
 }
 
 function Shell() {
@@ -116,7 +147,7 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <AppProvider>
-        <Shell />
+        <Root />
       </AppProvider>
     </SafeAreaProvider>
   );

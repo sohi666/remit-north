@@ -8,6 +8,7 @@ import { salesTax } from '../tax/engine/sales';
 import { Button, Card, Divider, Hero, Note, NumberField, Row, Screen, ToggleRow, Txt } from '../ui/kit';
 import { StackBar } from '../ui/charts';
 import { ProvinceChip } from '../ui/ProvincePicker';
+import { TipCard } from '../ui/TipCard';
 import { TablesBadge } from '../ui/TablesBadge';
 import { SPACE } from '../theme';
 
@@ -34,6 +35,7 @@ export function CorporateScreen() {
   return (
     <Screen title={s.corpTitle} subtitle={s.appName} right={<TablesBadge />}>
       <ProvinceChip />
+      <TipCard id="corp" text={s.tips.corp} />
       <Card>
         <NumberField label={s.revenue} value={v.revenue} onChange={(n) => upd({ revenue: n })} />
         <NumberField label={s.expenses} value={v.expenses} onChange={(n) => upd({ expenses: n })} />
