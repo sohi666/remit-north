@@ -48,13 +48,29 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '22'
+      - name: Write App Store Connect key
+        if: inputs.mode != 'check'
+        run: bash scripts/ci/write-secrets.sh ios
+      - uses: ruby/setup-ruby@v1
+        if: inputs.mode != 'check'
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+      - name: Listing text, categories and screenshots (fastlane ios metadata)
+        if: inputs.mode != 'check'
+        env:
+          FASTLANE_SKIP_UPDATE_CHECK: '1'
+          FASTLANE_HIDE_CHANGELOG: '1'
+          FASTLANE_OPT_OUT_USAGE: 'YES'
+        run: bundle exec fastlane ios metadata 2>&1 | tee "$RUNNER_TEMP/fastlane-ios.log"
       - name: App Store Connect (API)
         id: asc
+        if: always()
         run: |
           case "$MODE" in
             check) steps=ageRatingSchema,reviewReadiness ;;
-            setup) steps=ageRating,price,availability,reviewContact,reviewAttachment,selectBuild,reviewReadiness ;;
-            submit) steps=ageRating,price,availability,reviewContact,reviewAttachment,selectBuild,submit ;;
+            setup) steps=ageRating,contentRights,price,availability,reviewContact,reviewAttachment,selectBuild,reviewReadiness ;;
+            submit) steps=ageRating,contentRights,price,availability,reviewContact,reviewAttachment,selectBuild,submit ;;
           esac
           if [[ "$MODE" == "submit" && -z "$REVIEW_PHONE" ]]; then
             echo "::error::Add the repository secret REVIEW_PHONE (App Review contact phone; only Apple sees it)."
@@ -79,3 +95,6 @@ jobs:
           else
             bash scripts/notify.sh "ACTION NEEDED: App Review blockers" "${blockers:-$(grep -oE 'FAILED: .*' "$log" | head -2 | paste -sd ';' -)}" high warning "$ASC_APP_URL/distribution"
           fi
+      - name: Remove key files
+        if: always()
+        run: bash scripts/ci/write-secrets.sh cleanup

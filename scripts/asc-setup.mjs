@@ -423,6 +423,15 @@ async function ageRating() {
   log(`age rating: ${Object.keys(answers).length} answers set (none of the rated content)`);
 }
 
+/** "Does your app contain, show or access third-party content?" No: every figure is computed on the device. */
+async function contentRights() {
+  await asc(`/v1/apps/${APP}`, {
+    method: 'PATCH',
+    body: { data: { type: 'apps', id: APP, attributes: { contentRightsDeclaration: 'DOES_NOT_USE_THIRD_PARTY_CONTENT' } } },
+  });
+  log('content rights: does not use third-party content');
+}
+
 /** Print the live age-rating declaration with each attribute's JSON type (Apple changes this schema). */
 async function ageRatingSchema() {
   const infos = await asc(`/v1/apps/${APP}/appInfos?limit=5`);
@@ -445,7 +454,7 @@ if (missing.length) {
   process.exit(1);
 }
 // --only=reviewReadiness,ageRatingSchema runs just those steps.
-const STEPS = { ageRatingSchema, ageRating, price, availability, reviewContact, reviewAttachment, selectBuild, reviewReadiness, submit, resubmit };
+const STEPS = { ageRatingSchema, ageRating, contentRights, price, availability, reviewContact, reviewAttachment, selectBuild, reviewReadiness, submit, resubmit };
 const only = process.argv
   .find((a) => a.startsWith('--only='))
   ?.slice(7)

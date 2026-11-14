@@ -8,14 +8,16 @@ SHOTS = [  # (name, tab, scroll)
     ('3-sales', 'sales', 560),
     ('4-owner', 'owner', 380),
     ('5-corp', 'corp', 760),
+    ('6-property', 'property', 1500),
 ]
 TARGETS = [  # (folder, css width, css height, scale)
     ('fastlane/screenshots/{L}', 440, 956, 3),                       # App Store 6.9" (1320x2868)
     ('fastlane/metadata/android/{L}/images/phoneScreenshots', 400, 800, 2.7),  # Play (1080x2160)
+    ('fastlane/screenshots/{L}', 1032, 1376, 2),                     # iPad 13" (2064x2752)
 ]
 PREFS = {
-    'en-US': {'lang': 'en', 'theme': 'dark', 'onboarded': True, 'tipsSeen': ['payroll', 'sales', 'corp', 'owner'], 'prov': 'QC', 'payroll': {'amount': 85000, 'enterAnnual': True, 'periods': 26, 'eiExempt': True}},
-    'fr-CA': {'lang': 'fr', 'theme': 'dark', 'onboarded': True, 'tipsSeen': ['payroll', 'sales', 'corp', 'owner'], 'prov': 'QC', 'payroll': {'amount': 85000, 'enterAnnual': True, 'periods': 26, 'eiExempt': True}},
+    'en-US': {'lang': 'en', 'theme': 'dark', 'onboarded': True, 'tipsSeen': ['payroll', 'sales', 'corp', 'owner', 'property'], 'prov': 'QC', 'payroll': {'amount': 85000, 'enterAnnual': True, 'periods': 26, 'eiExempt': True}},
+    'fr-CA': {'lang': 'fr', 'theme': 'dark', 'onboarded': True, 'tipsSeen': ['payroll', 'sales', 'corp', 'owner', 'property'], 'prov': 'QC', 'payroll': {'amount': 85000, 'enterAnnual': True, 'periods': 26, 'eiExempt': True}},
 }
 
 async def main():
@@ -34,7 +36,7 @@ async def main():
                         await pg.mouse.move(w / 2, h / 2)
                         await pg.mouse.wheel(0, scroll)
                         await pg.wait_for_timeout(700)
-                    out = folder.format(L=L) + (f'/{i}.png' if 'android' in folder else f'/{name}.png')
+                    out = folder.format(L=L) + (f'/{i}.png' if 'android' in folder else f'/ipad13-{name}.png' if w > 900 else f'/{name}.png')
                     await pg.screenshot(path=out)
                 await ctx.close()
         await b.close()
