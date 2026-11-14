@@ -409,6 +409,20 @@ async function submit() {
   log(`submit: version ${editable.attributes.versionString} sent to App Review`);
 }
 
+/** Age rating answers from fastlane/app_rating_config.json (fastlane's deliver stops before it on a first version). */
+async function ageRating() {
+  const file = new URL('../fastlane/app_rating_config.json', import.meta.url).pathname;
+  const answers = Object.fromEntries(Object.entries(JSON.parse(readFileSync(file, 'utf8'))).filter(([, v]) => v !== null));
+  const infos = await asc(`/v1/apps/${APP}/appInfos?limit=5`);
+  const info = infos.data.find((i) => !['READY_FOR_DISTRIBUTION', 'REPLACED_WITH_NEW_INFO'].includes(i.attributes.state)) ?? infos.data[0];
+  const decl = await asc(`/v1/appInfos/${info.id}/ageRatingDeclaration`);
+  await asc(`/v1/ageRatingDeclarations/${decl.data.id}`, {
+    method: 'PATCH',
+    body: { data: { type: 'ageRatingDeclarations', id: decl.data.id, attributes: answers } },
+  });
+  log(`age rating: ${Object.keys(answers).length} answers set (none of the rated content)`);
+}
+
 /** Print the live age-rating declaration with each attribute's JSON type (Apple changes this schema). */
 async function ageRatingSchema() {
   const infos = await asc(`/v1/apps/${APP}/appInfos?limit=5`);
@@ -431,7 +445,7 @@ if (missing.length) {
   process.exit(1);
 }
 // --only=reviewReadiness,ageRatingSchema runs just those steps.
-const STEPS = { ageRatingSchema, price, availability, reviewContact, reviewAttachment, selectBuild, reviewReadiness, submit, resubmit };
+const STEPS = { ageRatingSchema, ageRating, price, availability, reviewContact, reviewAttachment, selectBuild, reviewReadiness, submit, resubmit };
 const only = process.argv
   .find((a) => a.startsWith('--only='))
   ?.slice(7)

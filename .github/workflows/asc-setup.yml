@@ -53,13 +53,15 @@ jobs:
         run: |
           case "$MODE" in
             check) steps=ageRatingSchema,reviewReadiness ;;
-            setup) steps=price,availability,reviewContact,reviewAttachment,selectBuild,reviewReadiness ;;
-            submit) steps=price,availability,reviewContact,reviewAttachment,selectBuild,submit ;;
+            setup) steps=ageRating,price,availability,reviewContact,reviewAttachment,selectBuild,reviewReadiness ;;
+            submit) steps=ageRating,price,availability,reviewContact,reviewAttachment,selectBuild,submit ;;
           esac
-          if [[ "$MODE" != "check" && -z "$REVIEW_PHONE" ]]; then
+          if [[ "$MODE" == "submit" && -z "$REVIEW_PHONE" ]]; then
             echo "::error::Add the repository secret REVIEW_PHONE (App Review contact phone; only Apple sees it)."
             exit 1
           fi
+          # Without a phone, setup does everything else and skips the contact, notes and video.
+          [[ -z "$REVIEW_PHONE" ]] && steps="${steps/reviewContact,reviewAttachment,/}"
           node scripts/asc-setup.mjs --only=$steps 2>&1 | tee "$RUNNER_TEMP/asc.log"
       - name: Notify
         if: always()
@@ -72,7 +74,7 @@ jobs:
             bash scripts/notify.sh "Remit North iOS submitted for App Review" "Build, notes and screen recording were sent. You'll be notified of every status change; after approval press Release in App Store Connect." default inbox_tray "$ASC_APP_URL/distribution"
           elif [[ "$OUTCOME" == "success" ]]; then
             bash scripts/notify.sh "Remit North iOS: App Store Connect $MODE done" "Apple accepts the version for review." default white_check_mark "$ASC_APP_URL/distribution"
-          elif [[ -z "$REVIEW_PHONE" && "$MODE" != "check" ]]; then
+          elif [[ -z "$REVIEW_PHONE" && "$MODE" == "submit" ]]; then
             bash scripts/notify.sh "ACTION NEEDED: add REVIEW_PHONE secret" "Repository secret REVIEW_PHONE (App Review contact phone) is needed before submitting." high warning "https://github.com/${{ github.repository }}/settings/secrets/actions/new"
           else
             bash scripts/notify.sh "ACTION NEEDED: App Review blockers" "${blockers:-$(grep -oE 'FAILED: .*' "$log" | head -2 | paste -sd ';' -)}" high warning "$ASC_APP_URL/distribution"
