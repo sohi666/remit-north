@@ -1,0 +1,1 @@
+salaire,retenues à la source,RRQ,RQAP,AE,TPS,TVQ,TVH,méthode rapide,société,dividendes,DAS

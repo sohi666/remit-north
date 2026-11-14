@@ -1,0 +1,1 @@
+Première version : retenues à la source pour les 13 provinces et territoires (Québec selon la TP-1015.F), TPS/TVH/TVQ méthode normale ou rapide, impôt des sociétés et planificateur salaire ou dividendes. Tables mises à jour en ligne, utilisables hors ligne.

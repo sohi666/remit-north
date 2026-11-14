@@ -1,0 +1,61 @@
+name: Tax tables watch
+
+# Weekly (and on demand): detects new CRA / Revenu Québec payroll tables and checks the shipped pack
+# against the CRA's own CSV. Anything that needs a pack update is pushed to ntfy as ACTION NEEDED.
+on:
+  schedule:
+    - cron: '17 11 * * 1' # Mondays 06:17 Toronto
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tables-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Restore previous fingerprints
+        uses: actions/cache/restore@v4
+        with:
+          path: .tables-watch
+          key: tables-watch-v1-${{ github.run_id }}
+          restore-keys: tables-watch-v1-
+      - name: Check sources
+        id: watch
+        run: |
+          node scripts/tables-watch.mjs | tee "$RUNNER_TEMP/watch.json"
+          {
+            echo "changed=$(jq -c '[.changed[].key]' "$RUNNER_TEMP/watch.json")"
+            echo "mismatches=$(jq '.mismatches | length' "$RUNNER_TEMP/watch.json")"
+          } >> "$GITHUB_OUTPUT"
+      - name: Save fingerprints
+        uses: actions/cache/save@v4
+        with:
+          path: .tables-watch
+          key: tables-watch-v1-${{ github.run_id }}
+      - name: Notify
+        run: |
+          changed='${{ steps.watch.outputs.changed }}'
+          n='${{ steps.watch.outputs.mismatches }}'
+          if [[ "$changed" != "[]" ]]; then
+            bash scripts/notify.sh "ACTION NEEDED: Remit North tax tables" \
+              "Government payroll pages changed: $(jq -r '[.changed[] | .key] | join(", ")' "$RUNNER_TEMP/watch.json"). Ask Claude to update src/tax/packs, then run Publish tables." \
+              high "warning,moneybag" "$RUN_URL"
+          fi
+          if [[ "$n" != "0" ]]; then
+            bash scripts/notify.sh "ACTION NEEDED: Remit North pack differs from CRA" \
+              "$n value(s) in the shipped pack are not in the CRA CSV: $(jq -r '.mismatches[:4] | join("; ")' "$RUNNER_TEMP/watch.json")" \
+              high "warning" "$RUN_URL"
+          fi

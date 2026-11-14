@@ -1,0 +1,82 @@
+name: Store status
+
+# Polls App Store Connect and Google Play every 30 minutes and pushes to ntfy
+# only when something changed. State lives in the Actions cache (see
+# docs/RELEASE.md > "Store monitor"). Pause it at zero cost by setting the
+# repository variable STORE_STATUS_PAUSED=true.
+on:
+  schedule:
+    # Off the :00/:30 marks, which GitHub delays the most.
+    - cron: '7 * * * *'
+  workflow_dispatch:
+    inputs:
+      reset:
+        description: Forget the saved state and report the current status again
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read # to see whether a release run is in progress
+
+concurrency:
+  group: store-status
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  poll:
+    name: Poll stores
+    if: ${{ vars.STORE_STATUS_PAUSED != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: scripts
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+
+      - name: Restore previous state
+        if: ${{ !inputs.reset }}
+        uses: actions/cache/restore@v5
+        with:
+          path: .store-status
+          key: store-status-v1-${{ github.run_id }}
+          restore-keys: store-status-v1-
+
+      - name: Is a release running?
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          n="$(gh run list --workflow release.yml --status in_progress --json databaseId --jq length 2>/dev/null || echo 0)"
+          echo "running=$([[ "${n:-0}" -gt 0 ]] && echo true || echo false)" >>"$GITHUB_OUTPUT"
+
+      - name: Check App Store Connect and Google Play
+        id: status
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          ASC_APP_ID: ${{ secrets.ASC_APP_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          ANDROID_PACKAGE: com.behtoyi.remitnorth
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          PLAY_CONSOLE_URL: ${{ vars.PLAY_CONSOLE_APP_URL || secrets.PLAY_CONSOLE_APP_URL }}
+          SKIP_GOOGLE: ${{ steps.release.outputs.running }}
+        run: node scripts/store-status.mjs --state .store-status/state.json
+
+      - name: Save new state
+        if: ${{ steps.status.outputs.changed == 'true' }}
+        uses: actions/cache/save@v5
+        with:
+          path: .store-status
+          key: store-status-v1-${{ github.run_id }}-${{ github.run_attempt }}

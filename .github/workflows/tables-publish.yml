@@ -1,0 +1,47 @@
+name: Publish tables
+
+# Publishes src/tax/packs to the public feed the app downloads (sohi666/remit-north-info, GitHub Pages).
+# Runs when a pack changes on main, after the same validation the app does.
+on:
+  push:
+    branches: [main]
+    paths: ['src/tax/packs/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run verify:pack
+      - run: npx vitest run
+      - run: node scripts/publish-tables.mjs
+      - name: Push to remit-north-info
+        env:
+          TOKEN: ${{ secrets.INFO_REPO_TOKEN }}
+        run: |
+          if [[ -z "$TOKEN" ]]; then
+            bash scripts/notify.sh "ACTION NEEDED: publish Remit North tables" "Secret INFO_REPO_TOKEN is missing. Copy site/tables into sohi666/remit-north-info by hand, or add the token." high warning "$RUN_URL"
+            exit 0
+          fi
+          git clone --depth 1 "https://x-access-token:${TOKEN}@github.com/sohi666/remit-north-info.git" "$RUNNER_TEMP/info"
+          mkdir -p "$RUNNER_TEMP/info/tables"
+          cp site/tables/* "$RUNNER_TEMP/info/tables/"
+          cd "$RUNNER_TEMP/info"
+          git add tables
+          if git diff --cached --quiet; then echo "No change"; exit 0; fi
+          git -c user.name="remit-north-bot" -c user.email="support@cibinc.ca" commit -m "Tax tables $(jq -r '[.packs[] | .version] | join(", ")' tables/index.json)"
+          git push
+          bash scripts/notify.sh "Remit North tables published" "$(jq -r '[.packs[] | .version] | join(", ")' tables/index.json) is live; apps pick it up within 12 hours." default "white_check_mark" "https://sohi666.github.io/remit-north-info/tables/index.json"

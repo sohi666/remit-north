@@ -1,0 +1,1 @@
+First release: payroll deductions for every province, GST/HST/QST Quick Method, corporate tax and salary vs dividends. Tables update online and work offline.

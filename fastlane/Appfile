@@ -1,0 +1,11 @@
+# Store identifiers for Remit North. Credentials come from the environment
+# (see docs/RELEASE.md); nothing secret belongs in this file.
+
+for_platform :ios do
+  app_identifier("com.behtoyi.remitnorth")
+end
+
+for_platform :android do
+  package_name("com.behtoyi.remitnorth")
+  json_key_file(ENV["GOOGLE_SERVICE_ACCOUNT_KEY_PATH"]) if ENV["GOOGLE_SERVICE_ACCOUNT_KEY_PATH"].to_s != ""
+end

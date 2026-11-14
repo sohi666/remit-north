@@ -1,0 +1,1 @@
+First release: payroll source deductions for all 13 provinces and territories (Quebec per TP-1015.F), GST/HST/QST regular vs Quick Method, corporate tax, and a salary vs dividends planner. Tables update online and work offline.

@@ -1,0 +1,751 @@
+name: Release
+
+# Build with EAS, upload to TestFlight / Google Play, submit for review.
+# Operator manual: docs/RELEASE.md. Every milestone and every "ACTION NEEDED"
+# goes to ntfy (secret NTFY_TOPIC).
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Platforms to build and submit
+        type: choice
+        options: [all, ios, android]
+        default: all
+      android_track:
+        description: Google Play track
+        type: choice
+        options: [internal, production]
+        default: internal
+      android_release_status:
+        description: completed = send to review / roll out; draft = upload only (required while the Play app is a draft)
+        type: choice
+        options: [completed, draft]
+        default: completed
+      submit_for_review:
+        description: Submit the iOS version for App Review after the TestFlight upload
+        type: boolean
+        default: true
+      ios_review_only:
+        description: No build - re-submit the newest processed iOS build for review (after a rejection, App Privacy, screenshots...)
+        type: boolean
+        default: false
+      ios_build_id:
+        description: Optional - reuse this finished EAS iOS build ID instead of building again (saves a free-plan build)
+        type: string
+        default: ''
+      android_promote:
+        description: No Android build - promote the newest internal-testing release to production and send it to Google review
+        type: boolean
+        default: false
+  push:
+    # Tag pushes use the repository variables RELEASE_PLATFORM (all),
+    # RELEASE_ANDROID_TRACK (production), RELEASE_ANDROID_STATUS (completed)
+    # and RELEASE_SUBMIT_FOR_REVIEW (true). The tag must equal "v" + app.json expo.version.
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+# One release at a time (remote build numbers, one App Review submission).
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  EAS_CLI_VERSION: '27.4.1' # bump deliberately; eas.json requires >= 27.4.0
+  NODE_VERSION: '22'
+  NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+  RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+  PLAY_CONSOLE_URL: ${{ vars.PLAY_CONSOLE_APP_URL || secrets.PLAY_CONSOLE_APP_URL || 'https://play.google.com/console/developers' }}
+  LANG: en_US.UTF-8
+  LC_ALL: en_US.UTF-8
+
+jobs:
+  prepare:
+    name: Prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      ios: ${{ steps.cfg.outputs.ios }}
+      android: ${{ steps.cfg.outputs.android }}
+      platform: ${{ steps.cfg.outputs.platform }}
+      android_profile: ${{ steps.cfg.outputs.android_profile }}
+      android_track: ${{ steps.cfg.outputs.android_track }}
+      android_release_status: ${{ steps.cfg.outputs.android_release_status }}
+      submit_for_review: ${{ steps.cfg.outputs.submit_for_review }}
+      review_only: ${{ steps.cfg.outputs.review_only }}
+      version: ${{ steps.cfg.outputs.version }}
+      ios_build_id: ${{ steps.cfg.outputs.ios_build_id }}
+      android_promote: ${{ steps.cfg.outputs.android_promote }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Resolve release settings
+        id: cfg
+        env:
+          EVENT: ${{ github.event_name }}
+          IN_PLATFORM: ${{ inputs.platform }}
+          IN_TRACK: ${{ inputs.android_track }}
+          IN_STATUS: ${{ inputs.android_release_status }}
+          IN_REVIEW: ${{ inputs.submit_for_review }}
+          IN_REVIEW_ONLY: ${{ inputs.ios_review_only }}
+          IN_IOS_BUILD_ID: ${{ inputs.ios_build_id }}
+          IN_ANDROID_PROMOTE: ${{ inputs.android_promote }}
+          TAG_PLATFORM: ${{ vars.RELEASE_PLATFORM || 'all' }}
+          TAG_TRACK: ${{ vars.RELEASE_ANDROID_TRACK || 'production' }}
+          TAG_STATUS: ${{ vars.RELEASE_ANDROID_STATUS || 'completed' }}
+          TAG_REVIEW: ${{ vars.RELEASE_SUBMIT_FOR_REVIEW || 'true' }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          HAS_EXPO: ${{ secrets.EXPO_TOKEN != '' }}
+          HAS_ASC: ${{ secrets.ASC_KEY_ID != '' && secrets.ASC_ISSUER_ID != '' && secrets.ASC_KEY_P8 != '' && secrets.ASC_APP_ID != '' }}
+        run: |
+          review_only=false
+          ios_build_id="$(echo "${IN_IOS_BUILD_ID:-}" | tr -d '[:space:]')"
+          if [[ -n "$ios_build_id" && ! "$ios_build_id" =~ ^[0-9a-f-]{36}$ ]]; then
+            echo "::error::ios_build_id '$ios_build_id' is not an EAS build ID (UUID)."
+            exit 1
+          fi
+          if [[ "$EVENT" == "workflow_dispatch" ]]; then
+            platform="$IN_PLATFORM" track="$IN_TRACK" status="$IN_STATUS" review="$IN_REVIEW"
+            if [[ "$IN_REVIEW_ONLY" == "true" ]]; then
+              review_only=true platform=ios review=true
+            fi
+          else
+            platform="$TAG_PLATFORM" track="$TAG_TRACK" status="$TAG_STATUS" review="$TAG_REVIEW"
+          fi
+          version="$(node -p "require('./app.json').expo.version")"
+          problems=()
+          [[ "$platform" =~ ^(all|ios|android)$ ]] || problems+=("Invalid platform '$platform'.")
+          [[ "$track" =~ ^(internal|production)$ ]] || problems+=("Invalid Android track '$track'.")
+          [[ "$status" =~ ^(completed|draft)$ ]] || problems+=("Invalid Android release status '$status'.")
+          if [[ "$REF_TYPE" == "tag" && "${REF_NAME#v}" != "$version" ]]; then
+            problems+=("Tag $REF_NAME does not match app.json expo.version ($version). Bump the version or re-tag.")
+          fi
+          [[ "$HAS_EXPO" == "true" ]] || problems+=("Repository secret EXPO_TOKEN is missing.")
+          ios=false android=false
+          [[ "$platform" == "all" || "$platform" == "ios" ]] && ios=true
+          [[ "$platform" == "all" || "$platform" == "android" ]] && android=true
+          if [[ "$ios" == "true" && "$HAS_ASC" != "true" ]]; then
+            problems+=("iOS needs the secrets ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8 and ASC_APP_ID.")
+          fi
+          if (( ${#problems[@]} )); then
+            msg="${problems[*]} See docs/RELEASE.md (one-time setup)."
+            echo "::error::$msg"
+            bash scripts/notify.sh "ACTION NEEDED: Remit North release cannot start" "$msg" high warning "$RUN_URL"
+            exit 1
+          fi
+          profile="$track"
+          [[ "$status" == "draft" ]] && profile="${track}-draft"
+          {
+            echo "ios=$ios"
+            echo "android=$android"
+            echo "platform=$platform"
+            echo "android_profile=$profile"
+            echo "android_track=$track"
+            echo "android_release_status=$status"
+            echo "submit_for_review=$review"
+            echo "review_only=$review_only"
+            echo "version=$version"
+            echo "ios_build_id=$ios_build_id"
+            echo "android_promote=${IN_ANDROID_PROMOTE:-false}"
+          } >>"$GITHUB_OUTPUT"
+          echo "Release $version: platform=$platform android=$track/$status (profile $profile) ios_review=$review review_only=$review_only"
+
+      - name: Store-readiness warnings (non-blocking)
+        if: steps.cfg.outputs.submit_for_review == 'true' || steps.cfg.outputs.android_track == 'production'
+        run: |
+          issues="$(node -e '
+            const x = require("./app.json").expo, extra = x.extra ?? {}, out = [];
+            // Ads off (no unit ids, no test ids) and no RevenueCat keys is a valid free release:
+            // the app never starts the ad SDK and hides every purchase button.
+            const units = ["ios", "android"].some((p) => extra.ads?.[p]?.rewarded || extra.ads?.[p]?.interstitial);
+            if (extra.ads?.useTestIds) out.push("extra.ads.useTestIds is true (test ads in a store build)");
+            if (units && JSON.stringify(x.plugins ?? []).includes("ca-app-pub-3940256099942544")) out.push("ad units are set but the AdMob app IDs are Google sample IDs");
+            const rc = [extra.revenuecat?.ios, extra.revenuecat?.android].filter(Boolean).length;
+            if (rc === 1) out.push("RevenueCat key set for only one platform (the shop shows on one store only)");
+            console.log(out.join("; "));')"
+          if [[ -n "$issues" ]]; then
+            echo "::warning::$issues"
+            bash scripts/notify.sh "ACTION NEEDED: store release with test config" \
+              "This release goes to review/production but app.json says: ${issues}. The run continues; fix app.json and release again before going live." \
+              high warning "$RUN_URL"
+          fi
+
+  gate:
+    name: Quality gate
+    needs: prepare
+    if: needs.prepare.outputs.review_only != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Typecheck, tests, level verification, store metadata
+        run: |
+          npx tsc --noEmit
+          npm test
+          npm run verify:pack
+          node scripts/check-store-metadata.mjs
+      - name: Notify failure
+        if: failure()
+        run: |
+          bash scripts/notify.sh "Remit North ${{ needs.prepare.outputs.version }}: release FAILED before the build" \
+            "Typecheck, tests, level verification or store-metadata lint failed. Open the run log." urgent rotating_light "$RUN_URL"
+
+  build:
+    # iOS builds on EAS cloud macOS workers (Xcode needs macOS).
+    name: iOS build (EAS cloud)
+    needs: [prepare, gate]
+    if: needs.prepare.outputs.review_only != 'true' && needs.prepare.outputs.ios == 'true' && needs.prepare.outputs.ios_build_id == ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 180 # free-tier EAS queues can be slow; the runner just waits
+    outputs:
+      ios_id: ${{ steps.parse.outputs.ios_id }}
+      ios_status: ${{ steps.parse.outputs.ios_status }}
+      ios_version: ${{ steps.parse.outputs.ios_version }}
+      ios_build_number: ${{ steps.parse.outputs.ios_build_number }}
+      ios_page: ${{ steps.parse.outputs.ios_page }}
+      android_id: ${{ steps.parse.outputs.android_id }}
+      android_status: ${{ steps.parse.outputs.android_status }}
+      android_version: ${{ steps.parse.outputs.android_version }}
+      android_build_number: ${{ steps.parse.outputs.android_build_number }}
+      android_page: ${{ steps.parse.outputs.android_page }}
+      android_artifact: ${{ steps.parse.outputs.android_artifact }}
+    env:
+      PLATFORM: ios
+      VERSION: ${{ needs.prepare.outputs.version }}
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+      APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID || '3EJ7FPDYM4' }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: ${{ env.EAS_CLI_VERSION }}
+          token: ${{ secrets.EXPO_TOKEN }}
+          packager: npm
+
+      - name: Let EAS repair iOS provisioning (needs APPLE_TEAM_ID variable)
+        run: bash scripts/ci/write-secrets.sh ios-build
+
+      - name: First-time iOS signing (reuse the team's distribution certificate)
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          EAS_CLI_DIR="$(npm root -g)/eas-cli"
+          if [[ ! -d "$EAS_CLI_DIR/build" ]]; then
+            npm install --prefix "$RUNNER_TEMP/eascli" --no-save --no-audit --no-fund "eas-cli@${EAS_CLI_VERSION}" >/dev/null
+            EAS_CLI_DIR="$RUNNER_TEMP/eascli/node_modules/eas-cli"
+          fi
+          if ! EAS_CLI_DIR="$EAS_CLI_DIR" node scripts/ci/ios-credentials.cjs; then
+            bash scripts/notify.sh "ACTION NEEDED: Remit North iOS signing credentials" \
+              "Automatic setup failed (see run log). On your computer: npx eas-cli@latest credentials -p ios > production > set up, reuse the existing distribution certificate. Then re-run." \
+              high warning "$RUN_URL"
+            exit 1
+          fi
+
+      - name: Notify build started
+        run: |
+          bash scripts/notify.sh "Remit North ${VERSION}: build started (${PLATFORM})" \
+            "iOS: EAS cloud build queued (free-plan builds can wait). Android builds on the GitHub runner. You will be notified at each step." low hammer "$RUN_URL"
+
+      - name: EAS build
+        id: eas
+        run: |
+          json="$RUNNER_TEMP/eas-build.json"
+          set +e
+          {
+            eas build --platform "$PLATFORM" --profile production --non-interactive --wait --json \
+              --message "Release ${VERSION} (${GITHUB_REF_NAME}, run ${GITHUB_RUN_ID})" 2>&1 1>&3 |
+              tee "$RUNNER_TEMP/eas-build.log"
+            echo "${PIPESTATUS[0]}" >"$RUNNER_TEMP/eas-build.code"
+          } 3>"$json"
+          set -e
+          code="$(cat "$RUNNER_TEMP/eas-build.code")"
+          echo "eas build exited with $code"
+          exit 0 # outcome is decided per platform in the next step
+
+      - name: Read build results
+        id: parse
+        run: |
+          json="$RUNNER_TEMP/eas-build.json"
+          if ! jq -e 'type == "array" and length > 0' "$json" >/dev/null 2>&1; then
+            echo "::error::eas build produced no build JSON (it failed before starting a build)."
+            bash scripts/ci/explain-failure.sh build "$RUNNER_TEMP/eas-build.log"
+            exit 1
+          fi
+          for p in ios android; do
+            jq -r --arg P "${p^^}" --arg k "$p" '
+              (map(select(.platform == $P)) | first) // empty
+              | "\($k)_id=\(.id)",
+                "\($k)_status=\(.status)",
+                "\($k)_version=\(.appVersion // "")",
+                "\($k)_build_number=\(.appBuildVersion // "")",
+                "\($k)_page=https://expo.dev/accounts/\(.app.ownerAccount.name // .project.ownerAccount.name)/projects/\(.app.slug // .project.slug)/builds/\(.id)",
+                "\($k)_artifact=\(.artifacts.applicationArchiveUrl // .artifacts.buildUrl // "")"
+            ' "$json" | tee -a "$GITHUB_OUTPUT" | grep -v '_artifact=' || true
+          done
+          failed=0
+          for p in ios android; do
+            [[ "$PLATFORM" == "all" || "$PLATFORM" == "$p" ]] || continue
+            status="$(jq -r --arg P "${p^^}" '(map(select(.platform == $P)) | first | .status) // "MISSING"' "$json")"
+            if [[ "$status" != "FINISHED" ]]; then
+              failed=1
+              page="$(jq -r --arg P "${p^^}" '(map(select(.platform == $P)) | first) // {} | "https://expo.dev/accounts/\(.app.ownerAccount.name // "")/projects/\(.app.slug // "")/builds/\(.id // "")"' "$json")"
+              BUILD_PAGE="$page" PLATFORM_LABEL="$p, $status" APP_VERSION="$VERSION" \
+                bash scripts/ci/explain-failure.sh build "$RUNNER_TEMP/eas-build.log"
+            fi
+          done
+          exit "$failed"
+
+      - name: Notify unexpected failure
+        if: failure() && steps.parse.outcome != 'failure'
+        run: |
+          bash scripts/notify.sh "Remit North ${VERSION}: iOS build FAILED to start" \
+            "EAS setup or upload failed before the iOS build started. Open the run log." urgent rotating_light "$RUN_URL"
+
+      - name: Remove key files
+        if: always()
+        run: bash scripts/ci/write-secrets.sh cleanup
+
+  build-android:
+    # Android builds on the GitHub runner with `eas build --local`: no EAS free-tier
+    # 45-minute cap or memory limit, full Gradle logs in this job.
+    name: Android build (GitHub runner)
+    needs: [prepare, gate]
+    if: needs.prepare.outputs.review_only != 'true' && needs.prepare.outputs.android == 'true' && needs.prepare.outputs.android_promote != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      build_number: ${{ steps.meta.outputs.build_number }}
+      artifact_name: ${{ steps.meta.outputs.artifact_name }}
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+      # A release build of both ABIs with native debug info needs ~25 GB of scratch space;
+      # the stock runner has ~30 GB free, which ran out ("Disk quota exceeded").
+      - name: Free disk space for the Android build
+        run: |
+          df -h /
+          sudo docker image prune -af >/dev/null 2>&1 || true
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/local/share/boost \
+            /usr/local/share/powershell /usr/share/swift /usr/local/share/chromium /opt/microsoft /opt/google \
+            /opt/az /usr/lib/google-cloud-sdk /usr/local/julia* /usr/share/miniconda /usr/local/aws-cli /usr/local/aws-sam-cli \
+            "$AGENT_TOOLSDIRECTORY/CodeQL" "$AGENT_TOOLSDIRECTORY/go" "$AGENT_TOOLSDIRECTORY/PyPy" \
+            "$AGENT_TOOLSDIRECTORY/Python" "$AGENT_TOOLSDIRECTORY/Ruby" \
+            "${ANDROID_HOME:-/usr/local/lib/android/sdk}/system-images" "${ANDROID_HOME:-/usr/local/lib/android/sdk}/emulator" || true
+          df -h /
+      # Private-repo runners are small (2 cores, ~7 GB RAM). Gradle + Kotlin + parallel
+      # C++ compiles + Metro ran it out of memory and killed the runner, so: swap,
+      # fewer parallel Gradle workers, and a larger, bounded Gradle heap.
+      - name: Add swap and cap Gradle memory
+        run: |
+          echo "cores: $(nproc)"; free -m; df -h / /mnt 2>/dev/null || true
+          dir=/mnt
+          avail="$(df -BG --output=avail /mnt 2>/dev/null | tail -1 | tr -dc '0-9')"
+          [[ "${avail:-0}" -ge 14 ]] || dir=/
+          sudo swapoff -a || true
+          sudo rm -f /mnt/swapfile /swapfile || true
+          sudo fallocate -l 10G "$dir/app.swap" # peak use was ~5.2 GB (Kotlin + C++ + Metro)
+          sudo chmod 600 "$dir/app.swap"
+          sudo mkswap "$dir/app.swap" >/dev/null
+          sudo swapon "$dir/app.swap"
+          mkdir -p ~/.gradle
+          # The user-home file overrides the gradle.properties that prebuild generates.
+          {
+            echo "org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g -XX:+UseParallelGC -Dfile.encoding=UTF-8"
+            echo "org.gradle.workers.max=2"
+            echo "org.gradle.parallel=false"
+            echo "org.gradle.caching=false"
+            echo "kotlin.compiler.execution.strategy=in-process"
+          } >~/.gradle/gradle.properties
+          free -m
+      - uses: actions/setup-java@v5
+        with:
+          distribution: zulu
+          java-version: '17'
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install
+        run: npm ci
+      # Leave the preinstalled NDKs alone: eas build --local checks that $ANDROID_NDK_HOME
+      # exists, and Gradle downloads the NDK React Native pins by itself.
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: ${{ env.EAS_CLI_VERSION }}
+          token: ${{ secrets.EXPO_TOKEN }}
+          packager: npm
+      - name: Notify build started
+        run: |
+          bash scripts/notify.sh "Remit North ${VERSION}: Android build started" "Building the .aab on the GitHub runner (about 20-40 min)." low hammer "$RUN_URL"
+      - name: Build .aab (eas build --local)
+        id: eas
+        run: |
+          mkdir -p "$RUNNER_TEMP/aab"
+          # Memory heartbeat every 2 min, so a slow or starving build shows up in the log.
+          ( while sleep 120; do
+              echo "[runner] $(date -u +%H:%M) mem $(free -m | awk '/^Mem/{print $3"/"$2}') MB, swap $(free -m | awk '/^Swap/{print $3}') MB, disk free $(df -BG --output=avail / | tail -1 | tr -d ' '), load $(cut -d' ' -f1 /proc/loadavg)"
+            done ) &
+          beat=$!
+          set +e
+          eas build --platform android --profile production --local --non-interactive \
+            --output "$RUNNER_TEMP/aab/remit-north-${VERSION}.aab" 2>&1 | tee "$RUNNER_TEMP/eas-build-android.log"
+          code="${PIPESTATUS[0]}"
+          set -e
+          kill "$beat" 2>/dev/null || true
+          [[ "$code" == "0" ]] || exit "$code"
+          test -s "$RUNNER_TEMP/aab/remit-north-${VERSION}.aab"
+      - name: Read version code
+        id: meta
+        run: |
+          code="$(eas build:version:get --platform android --profile production --non-interactive --json 2>/dev/null | jq -r '.versionCode // empty' || true)"
+          [[ -n "$code" ]] || code="$(grep -oE 'versionCode (from )?[0-9]+ to [0-9]+|versionCode [0-9]+' "$RUNNER_TEMP/eas-build-android.log" | grep -oE '[0-9]+$' | tail -1)"
+          name="remit-north-android-${VERSION}-${code:-unknown}"
+          mv "$RUNNER_TEMP/aab/remit-north-${VERSION}.aab" "$RUNNER_TEMP/aab/${name}.aab"
+          { echo "version=$VERSION"; echo "build_number=${code:-unknown}"; echo "artifact_name=$name"; } >>"$GITHUB_OUTPUT"
+          runtime="$(npx expo-updates runtimeversion:resolve --platform android 2>/dev/null | tail -1 | jq -r '.runtimeVersion // empty' || true)"
+          echo "Android ${VERSION} (${code:-?}) runtime version: ${runtime:-unknown}" | tee -a "$GITHUB_STEP_SUMMARY"
+      # Kept as a private GitHub artifact (needs a GitHub login); the ntfy topic is public.
+      - name: Attach the .aab to this run
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ steps.meta.outputs.artifact_name }}
+          path: ${{ runner.temp }}/aab/*.aab
+          retention-days: 14
+          if-no-files-found: error
+          compression-level: 0
+      - name: Explain failure
+        if: failure()
+        run: |
+          df -h / || true
+          PLATFORM_LABEL="android, local" APP_VERSION="$VERSION" BUILD_PAGE="$RUN_URL" \
+            bash scripts/ci/explain-failure.sh build "$RUNNER_TEMP/eas-build-android.log" || \
+            bash scripts/notify.sh "Remit North ${VERSION}: Android build FAILED" "The Gradle build on the GitHub runner failed. Open the run log." urgent rotating_light "$RUN_URL"
+
+  submit-ios:
+    name: iOS - TestFlight and App Review
+    needs: [prepare, build]
+    if: ${{ !cancelled() && needs.prepare.outputs.ios == 'true' && (needs.build.outputs.ios_status == 'FINISHED' || needs.prepare.outputs.review_only == 'true' || needs.prepare.outputs.ios_build_id != '') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      REVIEW_ONLY: ${{ needs.prepare.outputs.review_only }}
+      BUILD_ID: ${{ needs.build.outputs.ios_id || needs.prepare.outputs.ios_build_id }}
+      APP_VERSION: ${{ needs.build.outputs.ios_version || needs.prepare.outputs.version }}
+      BUILD_NUMBER: ${{ needs.build.outputs.ios_build_number }}
+      BUILD_PAGE: ${{ needs.build.outputs.ios_page }}
+      SUBMIT_FOR_REVIEW: ${{ needs.prepare.outputs.submit_for_review }}
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+      ASC_APP_ID: ${{ secrets.ASC_APP_ID }}
+      ASC_APP_URL: https://appstoreconnect.apple.com/apps/${{ secrets.ASC_APP_ID }}
+      IOS_FIRST_RELEASE: ${{ vars.IOS_FIRST_RELEASE }}
+      FASTLANE_SKIP_UPDATE_CHECK: '1'
+      FASTLANE_HIDE_CHANGELOG: '1'
+      FASTLANE_OPT_OUT_USAGE: 'YES'
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install
+        if: env.REVIEW_ONLY != 'true'
+        run: npm ci
+
+      - uses: expo/expo-github-action@v8
+        if: env.REVIEW_ONLY != 'true'
+        with:
+          eas-version: ${{ env.EAS_CLI_VERSION }}
+          token: ${{ secrets.EXPO_TOKEN }}
+          packager: npm
+
+      - name: Look up the reused iOS build
+        if: env.REVIEW_ONLY != 'true' && env.BUILD_NUMBER == ''
+        run: |
+          info="$(eas build:view "$BUILD_ID" --json)"
+          platform="$(jq -r '.platform' <<<"$info")" status="$(jq -r '.status' <<<"$info")"
+          if [[ "$platform" != "IOS" || "$status" != "FINISHED" ]]; then
+            echo "::error::Build $BUILD_ID is $platform/$status, not a finished iOS build."
+            exit 1
+          fi
+          {
+            echo "APP_VERSION=$(jq -r '.appVersion' <<<"$info")"
+            echo "BUILD_NUMBER=$(jq -r '.appBuildVersion' <<<"$info")"
+            echo "BUILD_PAGE=https://expo.dev/accounts/behtoyi/projects/remit-north/builds/$BUILD_ID"
+          } >>"$GITHUB_ENV"
+          echo "Reusing iOS build $BUILD_ID: $(jq -r '"\(.appVersion) (\(.appBuildVersion))"' <<<"$info")"
+
+      - name: Write App Store Connect key
+        run: bash scripts/ci/write-secrets.sh ios
+
+      - name: Point the submit profile at the App Store Connect app
+        if: env.REVIEW_ONLY != 'true'
+        # ascAppId is not env-substituted by eas-cli, so it is injected here
+        # (after the build, so the committed eas.json stays secret-free).
+        run: |
+          jq --arg id "$ASC_APP_ID" '.submit.production.ios.ascAppId = $id' eas.json >"$RUNNER_TEMP/eas.json"
+          mv "$RUNNER_TEMP/eas.json" eas.json
+
+      - name: Upload to TestFlight (eas submit)
+        id: upload
+        if: env.REVIEW_ONLY != 'true'
+        # No --what-to-test: EAS only accepts a TestFlight changelog on its Enterprise plan.
+        run: |
+          eas submit --platform ios --id "$BUILD_ID" --profile production --non-interactive --wait 2>&1 |
+            tee "$RUNNER_TEMP/eas-submit-ios.log"
+
+      - name: Notify TestFlight upload
+        if: env.REVIEW_ONLY != 'true'
+        run: |
+          next="Review submission was not requested for this run."
+          [[ "$SUBMIT_FOR_REVIEW" == "true" ]] && next="The App Review submission follows automatically once Apple has processed it."
+          bash scripts/notify.sh "Remit North iOS ${APP_VERSION} (${BUILD_NUMBER}) uploaded to TestFlight" \
+            "Apple is processing the build (usually 10-30 min). ${next}" default airplane "$ASC_APP_URL/testflight/ios"
+
+      - name: Check store URLs are live
+        id: urls
+        if: env.SUBMIT_FOR_REVIEW == 'true'
+        run: node scripts/check-store-metadata.mjs --check-urls 2>&1 | tee "$RUNNER_TEMP/store-urls.log"
+
+      - uses: ruby/setup-ruby@v1
+        if: env.SUBMIT_FOR_REVIEW == 'true'
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+
+      - name: Submit for App Review (fastlane deliver)
+        id: review
+        if: env.SUBMIT_FOR_REVIEW == 'true'
+        run: bundle exec fastlane ios submit_review 2>&1 | tee "$RUNNER_TEMP/fastlane-ios.log"
+
+      - name: Notify review submission
+        if: env.SUBMIT_FOR_REVIEW == 'true'
+        run: |
+          bash scripts/notify.sh "Remit North iOS ${APP_VERSION} submitted for App Review" \
+            "Metadata, age rating and build ${BUILD_NUMBER:-latest} were sent. The store monitor pushes every status change; after approval you press Release in App Store Connect." \
+            default inbox_tray "$ASC_APP_URL/distribution"
+
+      - name: Explain failure
+        if: failure()
+        env:
+          UPLOAD: ${{ steps.upload.outcome }}
+          URLS: ${{ steps.urls.outcome }}
+          REVIEW: ${{ steps.review.outcome }}
+        run: |
+          if [[ "$UPLOAD" == "failure" ]]; then
+            bash scripts/ci/explain-failure.sh ios-upload "$RUNNER_TEMP/eas-submit-ios.log"
+          elif [[ "$URLS" == "failure" ]]; then
+            bash scripts/ci/explain-failure.sh store-urls "$RUNNER_TEMP/store-urls.log"
+          elif [[ "$REVIEW" == "failure" ]]; then
+            # fastlane hides Apple's "associated errors"; ask the API for them so the diagnosis can name the blocker.
+            node scripts/asc-setup.mjs --only=reviewReadiness >>"$RUNNER_TEMP/fastlane-ios.log" 2>&1 || true
+            grep -E 'review blocker' "$RUNNER_TEMP/fastlane-ios.log" || true
+            bash scripts/ci/explain-failure.sh ios-review "$RUNNER_TEMP/fastlane-ios.log"
+          else
+            bash scripts/notify.sh "Remit North iOS ${APP_VERSION} release FAILED" "A setup step failed before the upload. Open the run log." urgent rotating_light "$RUN_URL"
+          fi
+
+      - name: Remove key files
+        if: always()
+        run: bash scripts/ci/write-secrets.sh cleanup
+
+  submit-android:
+    name: Android - Google Play
+    needs: [prepare, build-android]
+    if: ${{ !cancelled() && needs.prepare.outputs.android == 'true' && needs.build-android.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      APP_VERSION: ${{ needs.build-android.outputs.version }}
+      BUILD_NUMBER: ${{ needs.build-android.outputs.build_number }}
+      ARTIFACT_NAME: ${{ needs.build-android.outputs.artifact_name }}
+      ANDROID_PROFILE: ${{ needs.prepare.outputs.android_profile }}
+      ANDROID_TRACK: ${{ needs.prepare.outputs.android_track }}
+      ANDROID_RELEASE_STATUS: ${{ needs.prepare.outputs.android_release_status }}
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+      FASTLANE_SKIP_UPDATE_CHECK: '1'
+      FASTLANE_HIDE_CHANGELOG: '1'
+      FASTLANE_OPT_OUT_USAGE: 'YES'
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Get the .aab built in this run
+        id: aab
+        uses: actions/download-artifact@v6
+        with:
+          name: ${{ needs.build-android.outputs.artifact_name }}
+          path: ${{ runner.temp }}/aab
+
+      - name: No service account yet - manual upload
+        if: env.GOOGLE_SERVICE_ACCOUNT_JSON == ''
+        env:
+          AAB_URL: ${{ env.RUN_URL }}
+        run: |
+          NTFY_ACTIONS="view, Download .aab, ${AAB_URL}; view, Play Console, ${PLAY_CONSOLE_URL}" \
+          bash scripts/notify.sh "ACTION NEEDED: upload Remit North Android ${APP_VERSION} (${BUILD_NUMBER}) by hand" \
+            "GOOGLE_SERVICE_ACCOUNT_JSON is not set, so nothing was uploaded. Download the .aab (GitHub login) and in Play Console -> Remit North -> Test and release -> Testing -> Internal testing -> Create new release, upload it and roll it out. Add the secret to automate the next releases." \
+            high warning "$AAB_URL"
+
+      - uses: actions/setup-node@v6
+        if: env.GOOGLE_SERVICE_ACCOUNT_JSON != ''
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install
+        if: env.GOOGLE_SERVICE_ACCOUNT_JSON != ''
+        run: npm ci
+
+      - uses: expo/expo-github-action@v8
+        if: env.GOOGLE_SERVICE_ACCOUNT_JSON != ''
+        with:
+          eas-version: ${{ env.EAS_CLI_VERSION }}
+          token: ${{ secrets.EXPO_TOKEN }}
+          packager: npm
+
+      - name: Write Google service account key
+        if: env.GOOGLE_SERVICE_ACCOUNT_JSON != ''
+        run: bash scripts/ci/write-secrets.sh android
+
+      - uses: ruby/setup-ruby@v1
+        if: env.GOOGLE_SERVICE_ACCOUNT_JSON != '' && vars.PLAY_SYNC_LISTING != 'false'
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+
+      - name: Upload to Google Play (eas submit)
+        id: upload
+        if: env.GOOGLE_SERVICE_ACCOUNT_JSON != ''
+        run: |
+          eas submit --platform android --path "$(ls "$RUNNER_TEMP"/aab/*.aab | head -1)" --profile "$ANDROID_PROFILE" --non-interactive --wait 2>&1 |
+            tee "$RUNNER_TEMP/eas-submit-android.log"
+
+      # The listing in fastlane/metadata/android is the source of truth (set PLAY_SYNC_LISTING=false to stop syncing).
+      # Runs after the upload (supply needs an existing release); a listing problem only notifies.
+      - name: Sync Play store listing (fastlane supply)
+        id: listing
+        if: env.GOOGLE_SERVICE_ACCOUNT_JSON != '' && vars.PLAY_SYNC_LISTING != 'false'
+        continue-on-error: true
+        env:
+          PLAY_TRACK: ${{ env.ANDROID_TRACK }}
+          VERSION_CODE: ${{ env.BUILD_NUMBER }}
+        run: bundle exec fastlane android metadata 2>&1 | tee "$RUNNER_TEMP/fastlane-android.log"
+
+      - name: Notify listing problem
+        if: steps.listing.outcome == 'failure'
+        run: |
+          bash scripts/notify.sh "ACTION NEEDED: Play store listing not updated" \
+            "fastlane supply could not upload the listing from fastlane/metadata/android (the build upload continues). Open the run log, or fill the listing in Play Console." \
+            high warning "$RUN_URL"
+
+      - name: Notify Play upload
+        if: env.GOOGLE_SERVICE_ACCOUNT_JSON != ''
+        env:
+          AAB_URL: ${{ env.RUN_URL }}
+        run: |
+          if [[ "$ANDROID_RELEASE_STATUS" == "draft" ]]; then
+            bash scripts/notify.sh "ACTION NEEDED: roll out Remit North Android ${APP_VERSION} (${BUILD_NUMBER}) on ${ANDROID_TRACK}" \
+              "A DRAFT release was created. Play Console -> Remit North -> Test and release -> ${ANDROID_TRACK} -> Edit release -> Next -> Save and publish (finish any Dashboard setup tasks it lists first)." \
+              high warning "$PLAY_CONSOLE_URL"
+          else
+            if [[ "$ANDROID_TRACK" == "internal" ]]; then
+              detail="Internal testers usually get it within minutes (Google may still review it, especially the first release)."
+            else
+              detail="Sent to Google for review (hours to a few days). It goes live automatically after approval unless Managed publishing is on. Google emails any rejection."
+            fi
+            bash scripts/notify.sh "Remit North Android ${APP_VERSION} (${BUILD_NUMBER}) uploaded to Play ${ANDROID_TRACK}" \
+              "$detail" default robot "$PLAY_CONSOLE_URL"
+          fi
+
+      - name: Explain failure
+        if: failure()
+        env:
+          AAB_URL: ${{ env.RUN_URL }}
+          LISTING: ${{ steps.listing.outcome }}
+          UPLOAD: ${{ steps.upload.outcome }}
+        run: |
+          if [[ "$UPLOAD" == "failure" ]]; then
+            bash scripts/ci/explain-failure.sh android-upload "$RUNNER_TEMP/eas-submit-android.log"
+          elif [[ "$LISTING" == "failure" ]]; then
+            bash scripts/notify.sh "ACTION NEEDED: Play listing upload failed" "fastlane supply could not update the store listing (nothing was released). Check the run log; fix fastlane/metadata/android or unset PLAY_SYNC_LISTING." high warning "$RUN_URL"
+          else
+            NTFY_ACTIONS="view, Run log, ${RUN_URL}" bash scripts/notify.sh "Remit North Android ${APP_VERSION} release FAILED" "A step before the Play upload failed (download/attach .aab or setup). Open the run log." urgent rotating_light "${AAB_URL:-$RUN_URL}"
+          fi
+
+      - name: Remove key files
+        if: always()
+        run: bash scripts/ci/write-secrets.sh cleanup
+
+  promote-android:
+    # Promotes the tested internal-testing .aab to production (no rebuild), like iOS reuses the TestFlight build.
+    name: Android - promote internal to production
+    needs: prepare
+    if: needs.prepare.outputs.android == 'true' && needs.prepare.outputs.android_promote == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+      APP_VERSION: ${{ needs.prepare.outputs.version }}
+      ANDROID_TRACK: production
+      # draft = create the production release as a draft (required until the Play app is
+      # published once); you then press "Send for review" in Play Console -> Publishing overview.
+      PROMOTE_STATUS: ${{ needs.prepare.outputs.android_release_status }}
+      FASTLANE_SKIP_UPDATE_CHECK: '1'
+      FASTLANE_HIDE_CHANGELOG: '1'
+      FASTLANE_OPT_OUT_USAGE: 'YES'
+    steps:
+      - uses: actions/checkout@v6
+      - name: Write Google service account key
+        run: bash scripts/ci/write-secrets.sh android
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+      - name: Promote internal testing to production
+        id: promote
+        run: bundle exec fastlane android promote 2>&1 | tee "$RUNNER_TEMP/fastlane-promote.log"
+      - name: Notify
+        run: |
+          if [[ "$PROMOTE_STATUS" == "draft" ]]; then
+            bash scripts/notify.sh "ACTION NEEDED: send Remit North Android ${APP_VERSION} for review" \
+              "The production release was created as a draft (Play requires that for the first release). Play Console -> Publishing overview -> Send changes for review." \
+              high point_right "$PLAY_CONSOLE_URL"
+          else
+            bash scripts/notify.sh "Remit North Android ${APP_VERSION} sent to Google review" \
+              "The internal-testing build was promoted to production. Review takes hours to a few days; it goes live automatically after approval unless Managed publishing is on. Google emails any rejection." \
+              default inbox_tray "$PLAY_CONSOLE_URL"
+          fi
+      - name: Explain failure
+        if: failure()
+        run: bash scripts/ci/explain-failure.sh android-upload "$RUNNER_TEMP/fastlane-promote.log"
+      - name: Remove key files
+        if: always()
+        run: bash scripts/ci/write-secrets.sh cleanup

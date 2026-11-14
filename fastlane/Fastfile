@@ -1,0 +1,275 @@
+# frozen_string_literal: true
+
+# Remit North - store metadata and App Review submission.
+#
+# Binaries are built and uploaded by EAS (eas build / eas submit). These lanes
+# only use the App Store Connect and Google Play APIs, so they run on Linux.
+#
+#   bundle exec fastlane ios metadata       # listing text, categories, age rating, screenshots
+#   bundle exec fastlane ios submit_review  # the above + attach build + submit for App Review
+#   bundle exec fastlane android metadata   # Play listing text/images (no .aab, no changelogs)
+#
+# Environment:
+#   ASC_KEY_ID, ASC_ISSUER_ID          App Store Connect team API key
+#   ASC_API_KEY_PATH or ASC_KEY_P8     path to the .p8, or its contents
+#   APP_VERSION                        marketing version (default: expo.version in app.json)
+#   BUILD_NUMBER                       build to submit (default: newest processed build)
+#   IOS_FIRST_RELEASE=true|false       override first-version detection (release notes)
+#   BUILD_PROCESSING_TIMEOUT_MINUTES   how long to wait for TestFlight processing (default 60)
+#   GOOGLE_SERVICE_ACCOUNT_KEY_PATH or GOOGLE_SERVICE_ACCOUNT_JSON   Play service account
+#   SUPPLY_VALIDATE_ONLY=true          android metadata: validate without committing
+
+require "json"
+require "fileutils"
+require "tmpdir"
+
+opt_out_usage
+default_platform(:ios)
+
+APP_APP_IDENTIFIER = "com.behtoyi.remitnorth"
+# fastlane evaluates this file from ./fastlane but runs actions from the project
+# root, so resolve every path absolutely.
+APP_ROOT = File.exist?(File.join(Dir.pwd, "fastlane", "Fastfile")) ? Dir.pwd : File.expand_path("..", Dir.pwd)
+APP_FASTLANE = File.join(APP_ROOT, "fastlane")
+APP_METADATA = File.join(APP_FASTLANE, "metadata")
+APP_SCREENSHOTS = File.join(APP_FASTLANE, "screenshots")
+APP_RATING_CONFIG = File.join(APP_FASTLANE, "app_rating_config.json")
+APP_IOS_LOCALES = %w[en-US fr-CA].freeze
+# App Store version states meaning "this version was on the store at some point".
+APP_LIVE_STATES = %w[
+  READY_FOR_SALE READY_FOR_DISTRIBUTION REPLACED_WITH_NEW_VERSION
+  REMOVED_FROM_SALE DEVELOPER_REMOVED_FROM_SALE
+].freeze
+
+def app_env(name)
+  value = ENV[name].to_s.strip
+  value.empty? ? nil : value
+end
+
+# Team API key from the environment; also sets the Spaceship token used below.
+def app_asc_api_key
+  key_id = app_env("ASC_KEY_ID") || UI.user_error!("ASC_KEY_ID is not set")
+  issuer_id = app_env("ASC_ISSUER_ID") || UI.user_error!("ASC_ISSUER_ID is not set")
+  options = { key_id: key_id, issuer_id: issuer_id, duration: 1200, in_house: false }
+  path = app_env("ASC_API_KEY_PATH")
+  if path && File.exist?(path)
+    app_store_connect_api_key(options.merge(key_filepath: path))
+  elsif (content = app_env("ASC_KEY_P8"))
+    app_store_connect_api_key(options.merge(key_content: content.gsub("\\n", "\n")))
+  else
+    UI.user_error!("Set ASC_API_KEY_PATH (path to the .p8 file) or ASC_KEY_P8 (its contents)")
+  end
+end
+
+def app_app
+  Spaceship::ConnectAPI::App.find(APP_APP_IDENTIFIER) ||
+    UI.user_error!("#{APP_APP_IDENTIFIER} not found in App Store Connect: create the app record first (docs/RELEASE.md)")
+end
+
+def app_app_version
+  app_env("APP_VERSION") ||
+    JSON.parse(File.read(File.join(APP_ROOT, "app.json"))).dig("expo", "version") ||
+    UI.user_error!("APP_VERSION not set and app.json has no expo.version")
+end
+
+# Apple does not accept "What's New" or phased release on an app's first version.
+def app_first_release?(app)
+  forced = app_env("IOS_FIRST_RELEASE")
+  return forced == "true" unless forced.nil?
+
+  versions = app.get_app_store_versions(filter: { platform: "IOS" })
+  live = versions.any? do |v|
+    state = (v.respond_to?(:app_version_state) && v.app_version_state) || v.app_store_state
+    APP_LIVE_STATES.include?(state.to_s)
+  end
+  UI.message(live ? "An earlier version has been on the App Store." : "No version has been on the App Store yet: treating this as the first release.")
+  !live
+rescue StandardError => e
+  UI.important("Could not check earlier App Store versions (#{e.message}); leaving release notes out to be safe.")
+  true
+end
+
+def app_metadata_path(first_release)
+  tmp = Dir.mktmpdir("app-metadata")
+  FileUtils.cp_r(File.join(APP_METADATA, "."), tmp)
+  if first_release
+    Dir.glob(File.join(tmp, "*", "release_notes.txt")).each { |f| FileUtils.rm_f(f) }
+    UI.message("First version: release_notes.txt left out (App Store shows no 'What's New' for 1.0).")
+  end
+  # Apple requires the whole App Review contact (name, phone, email) in every change to that
+  # record. Without REVIEW_PHONE, leave the review information alone instead of failing;
+  # with it, send contact + notes together (app_review_information).
+  unless app_env("REVIEW_PHONE")
+    FileUtils.rm_rf(File.join(tmp, "review_information"))
+    UI.important("REVIEW_PHONE not set: App Review contact and notes left unchanged.")
+  end
+  tmp
+end
+
+# Contact for App Review (only Apple sees it); notes come from metadata/review_information/notes.txt.
+def app_review_information
+  phone = app_env("REVIEW_PHONE")
+  return {} unless phone
+
+  {
+    app_review_information: {
+      first_name: app_env("REVIEW_FIRST_NAME") || "Sohrab",
+      last_name: app_env("REVIEW_LAST_NAME") || "Behtoyi",
+      phone_number: phone,
+      email_address: app_env("REVIEW_EMAIL") || "support@cibinc.ca",
+      notes: File.read(File.join(APP_METADATA, "review_information", "notes.txt")).strip
+    }
+  }
+end
+
+def app_screenshots?
+  APP_IOS_LOCALES.any? { |l| Dir.glob(File.join(APP_SCREENSHOTS, l, "*.{png,jpg,jpeg,PNG,JPG,JPEG}")).any? }
+end
+
+def app_deliver_options(api_key, app_version, metadata_path)
+  options = {
+    api_key: api_key,
+    app_identifier: APP_APP_IDENTIFIER,
+    platform: "ios",
+    app_version: app_version,
+    skip_binary_upload: true,
+    skip_metadata: false,
+    metadata_path: metadata_path,
+    app_rating_config_path: APP_RATING_CONFIG,
+    force: true, # no HTML preview / confirmation prompt
+    precheck_include_in_app_purchases: false # precheck cannot read IAPs with an API key
+  }
+  if app_screenshots?
+    options.merge(skip_screenshots: false, screenshots_path: APP_SCREENSHOTS, overwrite_screenshots: true)
+  else
+    UI.important("No screenshots in fastlane/screenshots/<locale>: keeping the ones already in App Store Connect.")
+    options.merge(skip_screenshots: true)
+  end
+end
+
+# Wait until App Store Connect has processed the uploaded build.
+def app_wait_for_build(app, version, build_number)
+  minutes = (app_env("BUILD_PROCESSING_TIMEOUT_MINUTES") || "60").to_i
+  deadline = Time.now + (minutes * 60)
+  loop do
+    build = Spaceship::ConnectAPI::Build.all(
+      app_id: app.id, version: version, build_number: build_number,
+      platform: Spaceship::ConnectAPI::Platform::IOS
+    ).first
+    state = build&.processing_state
+    case state
+    when "VALID"
+      UI.success("Build #{version} (#{build_number}) is processed.")
+      return build
+    when "FAILED", "INVALID"
+      UI.user_error!("APP_BUILD_INVALID: build #{version} (#{build_number}) processing state is #{state}")
+    end
+    if Time.now > deadline
+      code = build ? "APP_BUILD_TIMEOUT" : "APP_BUILD_NOT_FOUND"
+      UI.user_error!("#{code}: build #{version} (#{build_number}) still #{state || 'not visible'} after #{minutes} min")
+    end
+    UI.message("Waiting for build #{version} (#{build_number}): #{state || 'not visible yet'}...")
+    sleep(30)
+  end
+end
+
+platform :ios do
+  desc "Upload App Store metadata, categories, age rating and screenshots (no binary, no submission)"
+  lane :metadata do
+    api_key = app_asc_api_key
+    first = app_first_release?(app_app)
+    deliver(app_deliver_options(api_key, app_app_version, app_metadata_path(first)).merge(app_review_information).merge(
+      submit_for_review: false,
+      run_precheck_before_submit: false
+    ))
+  end
+
+  desc "Upload metadata + age rating, attach the processed build and submit the version for App Review"
+  lane :submit_review do
+    api_key = app_asc_api_key
+    app = app_app
+    version = app_app_version
+    build_number = app_env("BUILD_NUMBER")
+    app_wait_for_build(app, version, build_number) if build_number
+    first = app_first_release?(app)
+
+    deliver(app_deliver_options(api_key, version, app_metadata_path(first)).merge(app_review_information).merge(
+      build_number: build_number || "latest",
+      submit_for_review: true,
+      automatic_release: false, # approval -> "Pending Developer Release"; you press Release
+      phased_release: !first,   # 7-day phased rollout for updates (not applicable to 1.0)
+      reset_ratings: false,
+      run_precheck_before_submit: true,
+      precheck_default_rule_level: :warn,
+      submission_information: {
+        export_compliance_uses_encryption: false, # HTTPS only (exempt)
+        # Licensed third-party assets: fonts (SIL OFL) and instrument samples (FluidR3 GM, MIT).
+        content_rights_contains_third_party_content: true,
+        content_rights_has_rights: true,
+        # 1.0 ships without the ad SDK (react-native.config.js) and never requests ATT.
+        # Apple now asks about IDFA in the App Privacy questionnaire (docs/store-forms.md).
+        add_id_info_uses_idfa: false
+      }
+    ))
+  end
+end
+
+platform :android do
+  desc "Promote the newest internal-testing release to production (same .aab, no rebuild) and send it to Google review"
+  lane :promote do
+    options = {
+      package_name: APP_APP_IDENTIFIER,
+      track: "internal",
+      track_promote_to: app_env("PROMOTE_TO") || "production",
+      track_promote_release_status: app_env("PROMOTE_STATUS") || "completed", # draft until the app is published once
+      skip_upload_apk: true,
+      skip_upload_aab: true,
+      skip_upload_metadata: true,
+      skip_upload_changelogs: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true
+    }
+    if (code = app_env("VERSION_CODE"))
+      options[:version_code] = code.to_i
+    end
+    if (path = app_env("GOOGLE_SERVICE_ACCOUNT_KEY_PATH"))
+      options[:json_key] = path
+    elsif (data = app_env("GOOGLE_SERVICE_ACCOUNT_JSON"))
+      options[:json_key_data] = data
+    else
+      UI.user_error!("Set GOOGLE_SERVICE_ACCOUNT_KEY_PATH or GOOGLE_SERVICE_ACCOUNT_JSON")
+    end
+    supply(options)
+  end
+
+  desc "Upload the Google Play store listing (text, and images if present); never uploads an .aab"
+  lane :metadata do
+    options = {
+      package_name: APP_APP_IDENTIFIER,
+      metadata_path: File.join(APP_METADATA, "android"),
+      skip_upload_apk: true,
+      skip_upload_aab: true,
+      skip_upload_changelogs: true, # release notes need a release; EAS Submit creates those
+      skip_upload_metadata: false,
+      validate_only: app_env("SUPPLY_VALIDATE_ONLY") == "true",
+      # supply looks up an existing release even for listing-only uploads ("Could not find
+      # release for version code ''" otherwise), so point it at the track and build just uploaded.
+      track: app_env("PLAY_TRACK") || "internal"
+      # Until the app is first published it is a "draft app": committing listing changes then
+      # needs the service account's "Edit and delete draft apps" permission (Draft apps section),
+      # not only "Manage store presence"; otherwise: "The caller does not have permission".
+    }
+    options[:version_code] = app_env("VERSION_CODE").to_i if app_env("VERSION_CODE")
+    if (path = app_env("GOOGLE_SERVICE_ACCOUNT_KEY_PATH"))
+      options[:json_key] = path
+    elsif (data = app_env("GOOGLE_SERVICE_ACCOUNT_JSON"))
+      options[:json_key_data] = data
+    else
+      UI.user_error!("Set GOOGLE_SERVICE_ACCOUNT_KEY_PATH or GOOGLE_SERVICE_ACCOUNT_JSON")
+    end
+    images = Dir.glob(File.join(APP_METADATA, "android", "*", "images", "**", "*.{png,jpg,jpeg}")).any?
+    options[:skip_upload_images] = !images
+    options[:skip_upload_screenshots] = !images
+    supply(options)
+  end
+end

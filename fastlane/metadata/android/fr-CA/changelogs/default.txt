@@ -1,0 +1,1 @@
+Première version : retenues à la source pour chaque province, TPS/TVQ méthode rapide, impôt des sociétés et salaire ou dividendes. Tables à jour en ligne, utilisables hors ligne.

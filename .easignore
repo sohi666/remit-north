@@ -1,0 +1,19 @@
+# Files EAS Build does not need (keeps uploads small). Mirrors .gitignore plus store/docs material.
+node_modules/
+.expo/
+dist/
+web-build/
+public/canvaskit.wasm
+/ios
+/android
+*.p8
+*.jks
+.env*.local
+fastlane/
+store-screenshots/
+site/
+docs/
+tests/
+scripts/assets/svg/
+assets/store/
+.github/

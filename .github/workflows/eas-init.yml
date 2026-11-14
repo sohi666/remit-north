@@ -1,0 +1,46 @@
+name: EAS project setup
+
+# One-time: links the app to an Expo project (`eas init`) and commits the project ID to app.json.
+# Started automatically by Rotor's secrets bridge once EXPO_TOKEN exists; safe to re-run (no-op when linked).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  init:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: '27.4.1'
+          token: ${{ secrets.EXPO_TOKEN }}
+          packager: npm
+      - name: Link Expo project
+        run: |
+          if jq -e '.expo.extra.eas.projectId' app.json >/dev/null; then
+            echo "Already linked: $(jq -r '.expo.extra.eas.projectId' app.json)"; exit 0
+          fi
+          if ! eas init --non-interactive --force 2>&1 | tee "$RUNNER_TEMP/init.log"; then
+            bash scripts/notify.sh "ACTION NEEDED: Remit North Expo setup" "eas init failed. On your computer: npx eas-cli@latest init, then push app.json." high warning "$RUN_URL"
+            exit 1
+          fi
+          id="$(jq -r '.expo.extra.eas.projectId // empty' app.json)"
+          test -n "$id"
+          git config user.name "remit-north-bot"
+          git config user.email "support@cibinc.ca"
+          git add app.json
+          git commit -m "Link Expo project ($id)"
+          git push
+          bash scripts/notify.sh "Remit North linked to Expo" "Project $id. Next: signing credentials are created by the first release run." default "white_check_mark" "$RUN_URL"

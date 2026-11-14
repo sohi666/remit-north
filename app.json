@@ -1,0 +1,77 @@
+{
+  "expo": {
+    "name": "Remit North",
+    "slug": "remit-north",
+    "owner": "behtoyi",
+    "scheme": "remitnorth",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "backgroundColor": "#0A0F1C",
+    "primaryColor": "#11B981",
+    "description": "Canadian payroll source deductions, GST/HST/QST, corporate tax and salary-vs-dividend planning for small businesses. Calcul des retenues à la source, TPS/TVQ et impôt des sociétés.",
+    "ios": {
+      "bundleIdentifier": "com.behtoyi.remitnorth",
+      "supportsTablet": true,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "CFBundleAllowMixedLocalizations": true,
+        "CFBundleLocalizations": [
+          "en",
+          "fr"
+        ]
+      }
+    },
+    "android": {
+      "package": "com.behtoyi.remitnorth",
+      "adaptiveIcon": {
+        "backgroundColor": "#12C48A",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "blockedPermissions": [
+        "com.google.android.gms.permission.AD_ID"
+      ],
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-localization",
+      "expo-sqlite",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 160,
+          "resizeMode": "contain",
+          "backgroundColor": "#0A0F1C"
+        }
+      ],
+      "expo-font",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 24
+          }
+        }
+      ],
+      "expo-asset"
+    ],
+    "extra": {
+      "links": {
+        "site": "https://sohi666.github.io/remit-north-info/",
+        "tables": "https://sohi666.github.io/remit-north-info/tables/index.json",
+        "contact": "mailto:support@cibinc.ca"
+      },
+      "eas": {
+        "projectId": "f0c3e34e-fed2-4ccb-a23c-332b7f41dde0"
+      }
+    }
+  }
+}
