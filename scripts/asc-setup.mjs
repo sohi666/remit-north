@@ -11,7 +11,7 @@
  * The App Privacy questionnaire has no public API: answer it in App Store Connect.
  */
 import { createHash, createPrivateKey, sign } from 'node:crypto';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename } from 'node:path';
 
 const API = 'https://api.appstoreconnect.apple.com';
@@ -432,6 +432,118 @@ async function contentRights() {
   log('content rights: does not use third-party content');
 }
 
+const META = new URL('../fastlane/metadata/', import.meta.url).pathname;
+const SHOTS = new URL('../fastlane/screenshots/', import.meta.url).pathname;
+const readMeta = (loc, f) => (existsSync(`${META}${loc}/${f}`) ? readFileSync(`${META}${loc}/${f}`, 'utf8').trim() : undefined);
+
+async function editableVersion() {
+  const versions = await asc(`/v1/apps/${APP}/appStoreVersions?filter[platform]=IOS&limit=20`);
+  return versions.data.find((v) =>
+    ['PREPARE_FOR_SUBMISSION', 'DEVELOPER_REJECTED', 'REJECTED', 'METADATA_REJECTED'].includes(v.attributes.appStoreState ?? v.attributes.appVersionState),
+  );
+}
+
+/** Version listing text (description, keywords, promo text, URLs) for every locale folder; no release notes on a first version. */
+async function listing() {
+  const v = await editableVersion();
+  if (!v) return log('listing: no editable version');
+  const locs = await all(`/v1/appStoreVersions/${v.id}/appStoreVersionLocalizations?limit=50`);
+  const first = !(await asc(`/v1/apps/${APP}/appStoreVersions?filter[appStoreState]=READY_FOR_SALE&limit=1`).catch(() => ({ data: [] }))).data.length;
+  for (const loc of readdirSync(META).filter((d) => /^[a-z]{2}-[A-Z]{2}$/.test(d))) {
+    const attributes = Object.fromEntries(
+      Object.entries({
+        description: readMeta(loc, 'description.txt'),
+        keywords: readMeta(loc, 'keywords.txt'),
+        promotionalText: readMeta(loc, 'promotional_text.txt'),
+        supportUrl: readMeta(loc, 'support_url.txt'),
+        marketingUrl: readMeta(loc, 'marketing_url.txt'),
+        ...(first ? {} : { whatsNew: readMeta(loc, 'release_notes.txt') }),
+      }).filter(([, x]) => x),
+    );
+    const existing = locs.find((l) => l.attributes.locale === loc);
+    try {
+      if (existing) {
+        await asc(`/v1/appStoreVersionLocalizations/${existing.id}`, { method: 'PATCH', body: { data: { type: 'appStoreVersionLocalizations', id: existing.id, attributes } } });
+      } else {
+        await asc('/v1/appStoreVersionLocalizations', {
+          method: 'POST',
+          body: { data: { type: 'appStoreVersionLocalizations', attributes: { locale: loc, ...attributes }, relationships: { appStoreVersion: { data: { type: 'appStoreVersions', id: v.id } } } } },
+        });
+      }
+    } catch (e) {
+      for (const l of explain(e)) console.error(`[asc-setup] listing ${loc} ERROR: ${l}`);
+      throw new Error(`listing ${loc} rejected (details above)`);
+    }
+    log(`listing ${loc}: ${Object.keys(attributes).join(', ')}`);
+  }
+}
+
+/** Screenshots from fastlane/screenshots/<locale>: 1320x2868 -> iPhone 6.9", 2064x2752 -> iPad 13". Replaces each set. */
+async function screenshots() {
+  const v = await editableVersion();
+  if (!v) return log('screenshots: no editable version');
+  const locs = await all(`/v1/appStoreVersions/${v.id}/appStoreVersionLocalizations?limit=50`);
+  const size = (buf) => [buf.readUInt32BE(16), buf.readUInt32BE(20)]; // PNG IHDR
+  const TYPES = { '1320x2868': 'APP_IPHONE_67', '2064x2752': 'APP_IPAD_PRO_3GEN_129' };
+  for (const loc of locs) {
+    const dir = `${SHOTS}${loc.attributes.locale}`;
+    if (!existsSync(dir)) continue;
+    const groups = {};
+    for (const f of readdirSync(dir).filter((f) => f.endsWith('.png')).sort()) {
+      const buf = readFileSync(`${dir}/${f}`);
+      const type = TYPES[size(buf).join('x')];
+      if (type) (groups[type] ??= []).push({ f, buf });
+    }
+    const sets = await all(`/v1/appStoreVersionLocalizations/${loc.id}/appScreenshotSets?limit=50`);
+    for (const [type, files] of Object.entries(groups)) {
+      let set = sets.find((s) => s.attributes.screenshotDisplayType === type);
+      if (set) {
+        for (const s of await all(`/v1/appScreenshotSets/${set.id}/appScreenshots?limit=50`)) await asc(`/v1/appScreenshots/${s.id}`, { method: 'DELETE' });
+      } else {
+        set = (
+          await asc('/v1/appScreenshotSets', {
+            method: 'POST',
+            body: { data: { type: 'appScreenshotSets', attributes: { screenshotDisplayType: type }, relationships: { appStoreVersionLocalization: { data: { type: 'appStoreVersionLocalizations', id: loc.id } } } } },
+          })
+        ).data;
+      }
+      for (const { f, buf } of files.slice(0, 10)) {
+        const shot = (
+          await asc('/v1/appScreenshots', {
+            method: 'POST',
+            body: { data: { type: 'appScreenshots', attributes: { fileName: f, fileSize: buf.length }, relationships: { appScreenshotSet: { data: { type: 'appScreenshotSets', id: set.id } } } } },
+          })
+        ).data;
+        for (const op of shot.attributes.uploadOperations ?? []) {
+          const headers = Object.fromEntries((op.requestHeaders ?? []).map((h) => [h.name, h.value]));
+          const res = await fetch(op.url, { method: op.method, headers, body: buf.subarray(op.offset, op.offset + op.length) });
+          if (!res.ok) throw new Error(`screenshot ${f}: upload -> ${res.status}`);
+        }
+        await asc(`/v1/appScreenshots/${shot.id}`, {
+          method: 'PATCH',
+          body: { data: { type: 'appScreenshots', id: shot.id, attributes: { uploaded: true, sourceFileChecksum: createHash('md5').update(buf).digest('hex') } } },
+        });
+      }
+      log(`screenshots ${loc.attributes.locale} ${type}: ${Math.min(files.length, 10)} uploaded`);
+    }
+  }
+  // Apple processes them asynchronously; wait until none is still pending.
+  for (let i = 0; i < 40; i++) {
+    let pending = 0, failed = [];
+    for (const loc of locs)
+      for (const set of await all(`/v1/appStoreVersionLocalizations/${loc.id}/appScreenshotSets?limit=50`))
+        for (const s of await all(`/v1/appScreenshotSets/${set.id}/appScreenshots?limit=50`)) {
+          const st = s.attributes.assetDeliveryState?.state;
+          if (st === 'FAILED') failed.push(`${s.attributes.fileName}: ${JSON.stringify(s.attributes.assetDeliveryState.errors ?? [])}`);
+          else if (st !== 'COMPLETE') pending++;
+        }
+    if (failed.length) throw new Error(`screenshots failed: ${failed.join('; ')}`);
+    if (!pending) return log('screenshots: all processed');
+    await new Promise((r) => setTimeout(r, 6000));
+  }
+  log('screenshots: uploaded, Apple is still processing some');
+}
+
 /** Print the live age-rating declaration with each attribute's JSON type (Apple changes this schema). */
 async function ageRatingSchema() {
   const infos = await asc(`/v1/apps/${APP}/appInfos?limit=5`);
@@ -454,7 +566,7 @@ if (missing.length) {
   process.exit(1);
 }
 // --only=reviewReadiness,ageRatingSchema runs just those steps.
-const STEPS = { ageRatingSchema, ageRating, contentRights, price, availability, reviewContact, reviewAttachment, selectBuild, reviewReadiness, submit, resubmit };
+const STEPS = { ageRatingSchema, ageRating, contentRights, listing, screenshots, price, availability, reviewContact, reviewAttachment, selectBuild, reviewReadiness, submit, resubmit };
 const only = process.argv
   .find((a) => a.startsWith('--only='))
   ?.slice(7)
