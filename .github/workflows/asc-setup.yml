@@ -1,0 +1,79 @@
+name: App Store submission
+
+# App Store Connect steps fastlane deliver doesn't cover, through the official API (scripts/asc-setup.mjs):
+#   check  - ask Apple what still blocks App Review (changes nothing)
+#   setup  - price Free, worldwide availability, App Review contact + notes + screen recording
+#   submit - setup, then attach the processed build and send the version to App Review
+# The App Review phone comes from the REVIEW_PHONE secret (never a workflow input: inputs show in public run logs).
+# App Privacy has no API: answer it in App Store Connect.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        options: [check, setup, submit]
+        default: check
+      build_number:
+        description: iOS build number to submit (empty = newest processed build)
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  asc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+      ASC_APP_ID: ${{ secrets.ASC_APP_ID }}
+      ASC_APP_URL: https://appstoreconnect.apple.com/apps/${{ secrets.ASC_APP_ID }}
+      REVIEW_PHONE: ${{ secrets.REVIEW_PHONE }}
+      REVIEW_EMAIL: support@cibinc.ca
+      REVIEW_ATTACHMENT: fastlane/review/remit-north-review.mp4
+      BUILD_NUMBER: ${{ inputs.build_number }}
+      MODE: ${{ inputs.mode }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: App Store Connect (API)
+        id: asc
+        run: |
+          case "$MODE" in
+            check) steps=ageRatingSchema,reviewReadiness ;;
+            setup) steps=price,availability,reviewContact,reviewAttachment,selectBuild,reviewReadiness ;;
+            submit) steps=price,availability,reviewContact,reviewAttachment,selectBuild,submit ;;
+          esac
+          if [[ "$MODE" != "check" && -z "$REVIEW_PHONE" ]]; then
+            echo "::error::Add the repository secret REVIEW_PHONE (App Review contact phone; only Apple sees it)."
+            exit 1
+          fi
+          node scripts/asc-setup.mjs --only=$steps 2>&1 | tee "$RUNNER_TEMP/asc.log"
+      - name: Notify
+        if: always()
+        env:
+          OUTCOME: ${{ steps.asc.outcome }}
+        run: |
+          log="$RUNNER_TEMP/asc.log"
+          blockers="$(grep -oE 'review blocker ERROR: .*' "$log" 2>/dev/null | cut -c23- | head -6 | paste -sd ';' -)"
+          if [[ "$OUTCOME" == "success" && "$MODE" == "submit" ]]; then
+            bash scripts/notify.sh "Remit North iOS submitted for App Review" "Build, notes and screen recording were sent. You'll be notified of every status change; after approval press Release in App Store Connect." default inbox_tray "$ASC_APP_URL/distribution"
+          elif [[ "$OUTCOME" == "success" ]]; then
+            bash scripts/notify.sh "Remit North iOS: App Store Connect $MODE done" "Apple accepts the version for review." default white_check_mark "$ASC_APP_URL/distribution"
+          elif [[ -z "$REVIEW_PHONE" && "$MODE" != "check" ]]; then
+            bash scripts/notify.sh "ACTION NEEDED: add REVIEW_PHONE secret" "Repository secret REVIEW_PHONE (App Review contact phone) is needed before submitting." high warning "https://github.com/${{ github.repository }}/settings/secrets/actions/new"
+          else
+            bash scripts/notify.sh "ACTION NEEDED: App Review blockers" "${blockers:-$(grep -oE 'FAILED: .*' "$log" | head -2 | paste -sd ';' -)}" high warning "$ASC_APP_URL/distribution"
+          fi

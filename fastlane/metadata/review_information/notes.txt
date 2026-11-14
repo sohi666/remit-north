@@ -1,7 +1,8 @@
-Remit North is a calculator for Canadian small businesses: payroll source deductions (CPP/QPP, EI, QPIP, federal and provincial income tax) for every province, GST/HST/QST regular vs Quick Method, corporate income tax and a salary vs dividends comparison.
+Remit North is a calculator for Canadian small businesses: payroll source deductions (CPP/QPP, EI, QPIP, federal and provincial income tax) for every province, GST/HST/QST regular vs Quick Method, corporate income tax, a salary vs dividends comparison, and an investment property calculator (rental income, sale and land transfer tax).
 
 - No account, no login, no in-app purchases, no ads, no analytics. Every feature is available immediately.
 - All calculations run on the device. The app collects no personal data.
 - Network use: the app downloads a public JSON file of tax rates (https://sohi666.github.io/remit-north-info/tables/index.json) so rates stay current after governments publish changes. If the device is offline it uses the rates built into the app.
 - The app is not affiliated with the Government of Canada, the CRA or Revenu Québec, and says so in Settings > Disclaimer. Figures come from the CRA T4127 payroll formulas and Revenu Québec publications, linked in Settings > Official sources.
 - Publisher: Consultation Behtoyi Inc., Quebec, Canada. Contact: support@cibinc.ca
+- The attached screen recording shows every tab of the app.
