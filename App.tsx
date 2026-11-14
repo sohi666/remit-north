@@ -14,18 +14,20 @@ import { SalesScreen } from './src/screens/SalesScreen';
 import { CorporateScreen } from './src/screens/CorporateScreen';
 import { OwnerPayScreen } from './src/screens/OwnerPayScreen';
 import { MoreScreen } from './src/screens/MoreScreen';
+import { PropertyScreen } from './src/screens/PropertyScreen';
 import { Onboarding } from './src/screens/Onboarding';
 import { DarkScope } from './src/state/app';
 import { Txt, tap, type IconName } from './src/ui/kit';
 
 SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
-type Tab = 'payroll' | 'sales' | 'corp' | 'owner' | 'more';
+type Tab = 'payroll' | 'sales' | 'corp' | 'owner' | 'property' | 'more';
 const TABS: { key: Tab; icon: IconName; iconOn: IconName }[] = [
   { key: 'payroll', icon: 'wallet-outline', iconOn: 'wallet' },
   { key: 'sales', icon: 'receipt-outline', iconOn: 'receipt' },
   { key: 'corp', icon: 'business-outline', iconOn: 'business' },
   { key: 'owner', icon: 'swap-horizontal-outline', iconOn: 'swap-horizontal' },
+  { key: 'property', icon: 'home-outline', iconOn: 'home' },
   { key: 'more', icon: 'settings-outline', iconOn: 'settings' },
 ];
 
@@ -80,6 +82,7 @@ function Shell() {
         {tab === 'sales' && <SalesScreen />}
         {tab === 'corp' && <CorporateScreen />}
         {tab === 'owner' && <OwnerPayScreen />}
+        {tab === 'property' && <PropertyScreen />}
         {tab === 'more' && <MoreScreen />}
       </View>
       <View
@@ -118,7 +121,7 @@ function Shell() {
               }}
               style={{ flex: 1, alignItems: 'center', gap: 3, paddingVertical: 4 }}
             >
-              <View style={{ paddingHorizontal: 14, paddingVertical: 4, borderRadius: 999, backgroundColor: on ? c.accent : 'transparent' }}>
+              <View style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: on ? c.accent : 'transparent' }}>
                 <Ionicons name={on ? t.iconOn : t.icon} size={20} color={on ? c.accentText : c.dim} />
               </View>
               <Txt variant="small" color={on ? c.text : c.dim} style={{ fontSize: 11 }} numberOfLines={1}>{s.tabs[t.key]}</Txt>

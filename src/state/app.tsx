@@ -39,6 +39,42 @@ export interface Prefs {
   sales: { sales: number; purchases: number; prior: number; activity: 'services' | 'goods' };
   corp: { revenue: number; expenses: number; payrollCost: number; otherIncome: number; psb: boolean; qcHours: number };
   owner: { profit: number; eiExempt: boolean; psb: boolean; qcHours: number };
+  property: {
+    mode: 'rental' | 'sale' | 'purchase';
+    grossRent: number;
+    vacancy: number;
+    share: number;
+    mortgageInterest: number;
+    propertyTax: number;
+    insurance: number;
+    repairs: number;
+    utilities: number;
+    condo: number;
+    management: number;
+    otherExp: number;
+    principal: number;
+    personalUse: number;
+    claimCca: boolean;
+    building: number;
+    boughtThisYear: boolean;
+    purposeBuilt: boolean;
+    otherIncome: number;
+    salePrice: number;
+    sellingCosts: number;
+    purchaseCost: number;
+    improvements: number;
+    landShare: number;
+    ccaClaimed: number;
+    flip: boolean;
+    prYears: number;
+    ownedYears: number;
+    mortgageBalance: number;
+    price: number;
+    assessed: number;
+    schedule: string;
+    singleFamily: boolean;
+    firstTimeBuyer: boolean;
+  };
 }
 
 const DEFAULTS: Prefs = {
@@ -52,6 +88,13 @@ const DEFAULTS: Prefs = {
   sales: { sales: 50000, purchases: 3000, prior: 0, activity: 'services' },
   corp: { revenue: 200000, expenses: 20000, payrollCost: 80000, otherIncome: 0, psb: false, qcHours: 2000 },
   owner: { profit: 150000, eiExempt: true, psb: false, qcHours: 2000 },
+  property: {
+    mode: 'rental', grossRent: 30000, vacancy: 2, share: 100, mortgageInterest: 9000, propertyTax: 4200, insurance: 1500,
+    repairs: 2000, utilities: 0, condo: 0, management: 0, otherExp: 500, principal: 6000, personalUse: 0, claimCca: true,
+    building: 250000, boughtThisYear: false, purposeBuilt: false, otherIncome: 90000, salePrice: 650000, sellingCosts: 30000,
+    purchaseCost: 450000, improvements: 15000, landShare: 30, ccaClaimed: 40000, flip: false, prYears: 0, ownedYears: 8,
+    mortgageBalance: 200000, price: 550000, assessed: 0, schedule: '', singleFamily: true, firstTimeBuyer: false,
+  },
 };
 
 const PREFS_KEY = 'prefs.v1';
@@ -68,6 +111,7 @@ function loadPrefs(): Prefs {
       sales: { ...DEFAULTS.sales, ...p.sales },
       corp: { ...DEFAULTS.corp, ...p.corp },
       owner: { ...DEFAULTS.owner, ...p.owner },
+      property: { ...DEFAULTS.property, ...p.property },
     };
   } catch {
     return DEFAULTS;

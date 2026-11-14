@@ -27,6 +27,12 @@ CORPORATE TAX
 SALARY OR DIVIDENDS?
 Find the mix of salary and non-eligible dividends that leaves the most cash in your pocket, and see the corporate tax, personal tax, CPP/QPP and RRSP room for each option.
 
+INVESTMENT PROPERTY
+• Rental income: rents, vacancy, deductible expenses, capital cost allowance (with the 2024–2027 accelerated first-year rule and the 10% purpose-built rental class) and the tax at your marginal rate
+• Owner-occupied duplexes and triplexes: only the rented share counts
+• Sale: capital gain at 50%, CCA recapture, terminal loss, flipping rule and principal residence exemption
+• Purchase: land transfer tax for every province, including Toronto, Montréal, Québec City and Laval, with first-time buyer rebates
+
 ALWAYS CURRENT, ALWAYS PRIVATE
 Tax tables follow the CRA T4127 payroll formulas and Revenu Québec's publications, and update online when governments publish new rates. Saved tables keep working offline. Remit North collects no data: your numbers never leave your phone.
 

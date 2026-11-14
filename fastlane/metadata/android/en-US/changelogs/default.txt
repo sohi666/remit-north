@@ -1,1 +1,1 @@
-First release: payroll deductions for every province, GST/HST/QST Quick Method, corporate tax and salary vs dividends. Tables update online and work offline.
+First release: payroll source deductions for all 13 provinces and territories (Quebec per TP-1015.F), GST/HST/QST regular vs Quick Method, corporate tax, a salary vs dividends planner, and an investment property calculator (rental income, sale and land transfer tax). Tables update online and work offline.
