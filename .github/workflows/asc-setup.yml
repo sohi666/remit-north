@@ -69,7 +69,7 @@ jobs:
           OUTCOME: ${{ steps.asc.outcome }}
         run: |
           log="$RUNNER_TEMP/asc.log"
-          blockers="$(grep -oE 'review blocker ERROR: .*' "$log" 2>/dev/null | cut -c23- | head -6 | paste -sd ';' -)"
+          blockers="$(grep -oE 'review blocker ERROR: .*' "$log" 2>/dev/null | cut -c23- | head -6 | paste -sd ';' - || true)"
           if [[ "$OUTCOME" == "success" && "$MODE" == "submit" ]]; then
             bash scripts/notify.sh "Remit North iOS submitted for App Review" "Build, notes and screen recording were sent. You'll be notified of every status change; after approval press Release in App Store Connect." default inbox_tray "$ASC_APP_URL/distribution"
           elif [[ "$OUTCOME" == "success" ]]; then
