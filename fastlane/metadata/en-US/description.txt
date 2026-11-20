@@ -1,3 +1,5 @@
+NOT A GOVERNMENT APP: Remit North is an independent app by Consultation Behtoyi Inc., not affiliated with the Government of Canada, the CRA, Revenu Québec or any other government. It submits nothing to any government. Official sources are listed at the end.
+
 Remit North is the pocket tax desk for Canadian small businesses, owner-managers and bookkeepers. Enter a salary, pick a province, and see exactly what to withhold, what it costs you as the employer, and what to send to the CRA and Revenu Québec.
 
 PAYROLL SOURCE DEDUCTIONS, ALL PROVINCES
@@ -39,3 +41,13 @@ Tax tables follow the CRA T4127 payroll formulas and Revenu Québec's publicatio
 English and French. Light and dark mode.
 
 Remit North gives estimates based on published formulas and is not tax, legal or accounting advice.
+
+OFFICIAL SOURCES
+• Payroll deductions, CRA T4127: https://www.canada.ca/en/revenue-agency/services/forms-publications/payroll/t4127-payroll-deductions-formulas.html
+• Revenu Québec TP-1015.F: https://www.revenuquebec.ca/en/businesses/source-deductions-and-employer-contributions/employers-principal-changes-for-2026/
+• GST/QST Quick Method: https://www.revenuquebec.ca/en/businesses/consumption-taxes/gsthst-and-qst/reporting-gsthst-and-qst/the-quick-method-of-accounting-for-calculating-gst-and-qst-remittances/applicable-rates/
+• Corporation tax, CRA: https://www.canada.ca/en/revenue-agency/services/tax/businesses/topics/corporations/corporation-tax-rates.html
+• Rental income, CRA T4036: https://www.canada.ca/en/revenue-agency/services/forms-publications/publications/t4036.html
+• Ontario land transfer tax: https://www.ontario.ca/document/land-transfer-tax
+• BC property transfer tax: https://www2.gov.bc.ca/gov/content/taxes/property-taxes/property-transfer-tax
+• Quebec transfer duties: https://www.legisquebec.gouv.qc.ca/en/document/cs/d-15.1
