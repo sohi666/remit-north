@@ -1,0 +1,51 @@
+name: Play listing
+
+# Uploads only the Google Play store listing (fastlane/metadata/android: title, descriptions, images).
+# No build. Use after a listing rejection, then send the change for review in Publishing overview.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  listing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+      PLAY_TRACK: production
+      VERSION_CODE: '4'
+      PLAY_CONSOLE_URL: https://play.google.com/console/u/0/developers/8943440992877992889/app/4972400912039685191/publishing
+      FASTLANE_SKIP_UPDATE_CHECK: '1'
+      FASTLANE_HIDE_CHANGELOG: '1'
+      FASTLANE_OPT_OUT_USAGE: 'YES'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Check store metadata
+        run: node scripts/check-store-metadata.mjs
+      - name: Write Play key
+        run: bash scripts/ci/write-secrets.sh android
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+      - name: Upload listing (fastlane android metadata)
+        id: listing
+        run: bundle exec fastlane android metadata 2>&1 | tee "$RUNNER_TEMP/fastlane-android.log"
+      - name: Notify
+        if: always()
+        run: |
+          if [[ "${{ steps.listing.outcome }}" == "success" ]]; then
+            bash scripts/notify.sh "Remit North Play listing updated" "The new description is in Play Console. Send it for review in Publishing overview if it isn't already." default memo "$PLAY_CONSOLE_URL"
+          else
+            bash scripts/notify.sh "Remit North Play listing upload FAILED" "Open the run log." high warning "$RUN_URL"
+          fi
+      - name: Remove key files
+        if: always()
+        run: bash scripts/ci/write-secrets.sh cleanup

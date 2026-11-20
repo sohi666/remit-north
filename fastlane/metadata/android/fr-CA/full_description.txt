@@ -1,4 +1,6 @@
-Remit North est le bureau fiscal de poche des petites entreprises, propriétaires dirigeants et teneurs de livres au Canada. Entrez un salaire, choisissez une province et voyez exactement quoi retenir, ce que ça vous coûte comme employeur et quoi remettre à l'ARC et à Revenu Québec.
+APPLICATION NON GOUVERNEMENTALE : Remit North est une application indépendante de Consultation Behtoyi Inc., sans lien avec le gouvernement du Canada, l'ARC, Revenu Québec ou tout autre gouvernement. Elle ne transmet rien à aucun gouvernement. Sources officielles à la fin.
+
+Le calculateur fiscal de poche des petites entreprises au Canada : quoi retenir sur un salaire, ce que ça coûte à l'employeur et quoi remettre.
 
 RETENUES À LA SOURCE, TOUTES LES PROVINCES
 • RRQ/RPC, RRQ2/RPC2, AE, RQAP, impôt fédéral et provincial
@@ -6,12 +8,8 @@ RETENUES À LA SOURCE, TOUTES LES PROVINCES
 • Exemption de l'AE pour l'actionnaire qui détient plus de 40 % des actions votantes
 • Coût de l'employeur : RRQ/RPC, AE à 1,4 fois, RQAP, Fonds des services de santé, normes du travail, CNESST
 • Montants à remettre à l'ARC (PD7A) et à Revenu Québec (TPZ-1015)
-• L'année en un coup d'œil : le mois où les maximums du RRQ et de l'AE sont atteints
 • Net vers brut : trouvez le salaire qui donne la paie nette voulue
 • Comparez le même salaire dans les 13 provinces et territoires
-
-LE QUÉBEC, BIEN FAIT
-L'impôt du Québec suit les formules TP-1015.F de Revenu Québec, avec le RRQ, le RQAP, la déduction pour travailleur et l'abattement fédéral.
 
 TPS/TVH, TVQ ET TVP
 • Méthode normale et méthode rapide côte à côte
@@ -27,14 +25,24 @@ SALAIRE OU DIVIDENDES?
 Trouvez la combinaison de salaire et de dividendes non déterminés qui vous laisse le plus d'argent, avec l'impôt de la société, l'impôt personnel, le RRQ et les droits REER de chaque option.
 
 IMMEUBLE LOCATIF
-• Revenu de location : loyers, inoccupation, dépenses déductibles, déduction pour amortissement (règle accélérée de 2024 à 2027 et catégorie de 10 % pour les immeubles locatifs neufs) et impôt à votre taux marginal
+• Revenu de location : dépenses, amortissement (DPA) et impôt à votre taux marginal
 • Duplex et triplex occupés par le propriétaire : seule la partie louée compte
 • Vente : gain en capital à 50 %, récupération de DPA, perte finale, règle sur les reventes précipitées et exemption pour résidence principale
 • Achat : droits de mutation pour chaque province, dont Toronto, Montréal, Québec et Laval, avec les remboursements pour premiers acheteurs
 
 TOUJOURS À JOUR, TOUJOURS PRIVÉ
-Les tables suivent les formules T4127 de l'ARC et les publications de Revenu Québec, et se mettent à jour en ligne quand les gouvernements publient de nouveaux taux. Les tables enregistrées fonctionnent hors ligne. Remit North ne collecte aucune donnée : vos chiffres restent sur votre téléphone.
+Les tables se mettent à jour en ligne et fonctionnent hors ligne. Aucune donnée collectée.
 
 Français et anglais. Mode clair et sombre.
 
 Remit North fournit des estimations fondées sur des formules publiées et ne constitue pas un avis fiscal, juridique ou comptable.
+
+SOURCES OFFICIELLES
+• Retenues sur la paie, ARC T4127 : https://www.canada.ca/en/revenue-agency/services/forms-publications/payroll/t4127-payroll-deductions-formulas.html
+• Retenues Revenu Québec TP-1015.F : https://www.revenuquebec.ca/en/businesses/source-deductions-and-employer-contributions/employers-principal-changes-for-2026/
+• Méthode rapide TPS/TVQ : https://www.revenuquebec.ca/en/businesses/consumption-taxes/gsthst-and-qst/reporting-gsthst-and-qst/the-quick-method-of-accounting-for-calculating-gst-and-qst-remittances/applicable-rates/
+• Impôt des sociétés, ARC : https://www.canada.ca/en/revenue-agency/services/tax/businesses/topics/corporations/corporation-tax-rates.html
+• Revenus de location, ARC T4036 : https://www.canada.ca/en/revenue-agency/services/forms-publications/publications/t4036.html
+• Droits de cession, Ontario : https://www.ontario.ca/document/land-transfer-tax
+• Taxe de transfert, C.-B. : https://www2.gov.bc.ca/gov/content/taxes/property-taxes/property-transfer-tax
+• Droits de mutation, Québec : https://www.legisquebec.gouv.qc.ca/en/document/cs/d-15.1
